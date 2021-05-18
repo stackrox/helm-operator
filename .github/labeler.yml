@@ -1,3 +1,5 @@
+upstream-triage:
+  - "./*"
 area/main-binary:
 - changed-files:
   - any-glob-to-any-file:

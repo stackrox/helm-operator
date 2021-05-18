@@ -1,14 +1,15 @@
 name: Deploy
 
-on:
-  merge_group:
-  push:
-    branches:
-      - 'main'
-    tags:
-      - 'v*'
-  pull_request:
-    branches: [ main ]
+# Disabled as we don't need docker images to use the helm-operator as a library.
+#on:
+#  merge_group:
+#  push:
+#    branches:
+#      - 'main'
+#    tags:
+#      - 'v*'
+#  pull_request:
+#    branches: [ main ]
 
 jobs:
   goreleaser:
