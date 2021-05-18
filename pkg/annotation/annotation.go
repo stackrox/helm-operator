@@ -24,11 +24,11 @@ limitations under the License.
 //    r, err := reconciler.New(
 //	    reconciler.WithChart(*w.Chart),
 //	    reconciler.WithGroupVersionKind(w.GroupVersionKind),
-//	    reconciler.WithInstallAnnotations(annotation.InstallDisableHook{}),
+//	    reconciler.WithInstallAnnotations(annotation.InstallDisableHooks{}),
 //	  )
 //
 // If the reconciler detects an annotation named "helm.sdk.operatorframework.io/install-disable-hooks"
-// on the watched custom resource it sets the install.DisableHooks option to the annotations value. For more information
+// on the watched custom resource, it sets the install.DisableHooks option to the annotations value. For more information
 // take a look at the InstallDisableHooks.InstallOption method.
 //
 //   kind: OperatorHelmKind
@@ -66,7 +66,7 @@ type Upgrade interface {
 	UpgradeOption(string) helmclient.UpgradeOption
 }
 
-// Uninstall configures an install annotation.
+// Uninstall configures an uninstall annotation.
 type Uninstall interface {
 	Name() string
 	UninstallOption(string) helmclient.UninstallOption
