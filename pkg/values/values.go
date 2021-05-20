@@ -38,5 +38,5 @@ type Translator interface {
 type TranslatorFunc func(*unstructured.Unstructured) (chartutil.Values, error)
 
 func (t TranslatorFunc) Translate(u *unstructured.Unstructured) (chartutil.Values, error) {
-	return t.Translate(u)
+	return t(u)
 }
