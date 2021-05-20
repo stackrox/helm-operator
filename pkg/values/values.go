@@ -18,6 +18,7 @@ package values
 
 import (
 	"helm.sh/helm/v3/pkg/chartutil"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 type Mapper interface {
@@ -28,4 +29,14 @@ type MapperFunc func(chartutil.Values) chartutil.Values
 
 func (m MapperFunc) Map(v chartutil.Values) chartutil.Values {
 	return m(v)
+}
+
+type Translator interface {
+	Translate(unstructured *unstructured.Unstructured) (chartutil.Values, error)
+}
+
+type TranslatorFunc func(*unstructured.Unstructured) (chartutil.Values, error)
+
+func (t TranslatorFunc) Translate(u *unstructured.Unstructured) (chartutil.Values, error) {
+	return t.Translate(u)
 }
