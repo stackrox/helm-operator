@@ -13,7 +13,7 @@ by mapping the [values](https://helm.sh/docs/chart_template_guide/values_files/)
 
 For creating a [Level II+](https://sdk.operatorframework.io/docs/advanced-topics/operator-capabilities/operator-capabilities/) operator 
 that reuses an already existing Helm chart, we need a [hybrid](https://github.com/operator-framework/operator-sdk/issues/670)
-between the Go and Helm operator types is.
+between the Go and Helm operator types.
 
 The hybrid approach allows adding customizations to the Helm operator, such as:
 - value mapping based on cluster state, or 
