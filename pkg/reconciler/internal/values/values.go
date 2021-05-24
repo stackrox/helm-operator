@@ -32,14 +32,6 @@ type Values struct {
 }
 
 func FromUnstructured(obj *unstructured.Unstructured) (*Values, error) {
-	specMap, err := ChartValuesFromUnstructured(obj)
-	if err != nil {
-		return nil, err
-	}
-	return New(specMap), nil
-}
-
-func ChartValuesFromUnstructured(obj *unstructured.Unstructured) (map[string]interface{}, error) {
 	if obj == nil || obj.Object == nil {
 		return nil, fmt.Errorf("nil object")
 	}
@@ -51,7 +43,7 @@ func ChartValuesFromUnstructured(obj *unstructured.Unstructured) (map[string]int
 	if !ok {
 		return nil, fmt.Errorf("spec must be a map")
 	}
-	return specMap, nil
+	return New(specMap), nil
 }
 
 func New(m map[string]interface{}) *Values {
@@ -78,5 +70,9 @@ func (v *Values) ApplyOverrides(in map[string]string) error {
 var DefaultMapper = values.MapperFunc(func(v chartutil.Values) chartutil.Values { return v })
 
 var DefaultTranslator = values.TranslatorFunc(func(u *unstructured.Unstructured) (chartutil.Values, error) {
-	return ChartValuesFromUnstructured(u)
+	internalValues, err := FromUnstructured(u)
+	if err != nil {
+		return chartutil.Values{}, err
+	}
+	return internalValues.Map(), err
 })

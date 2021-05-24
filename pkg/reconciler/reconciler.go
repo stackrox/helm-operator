@@ -365,6 +365,7 @@ func WithPostHook(h hook.PostHook) Option {
 
 // WithValueTranslator is an Option that configures a function that translates a
 // custom resource to the values passed to Helm.
+// Use this if you need to customize the logic that translates your custom resource to Helm values.
 func WithValueTranslator(t values.Translator) Option {
 	return func(r *Reconciler) error {
 		r.valueTranslator = t
@@ -374,6 +375,8 @@ func WithValueTranslator(t values.Translator) Option {
 
 // WithValueMapper is an Option that configures a function that maps values
 // from a custom resource spec to the values passed to Helm.
+// Use this if you want to apply a transformation on the values obtained from your custom resource, before
+// they are passed to Helm.
 func WithValueMapper(m values.Mapper) Option {
 	return func(r *Reconciler) error {
 		r.valueMapper = m
