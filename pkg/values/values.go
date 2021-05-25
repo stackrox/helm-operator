@@ -21,6 +21,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
+// TODO: Consider deprecating Mapper and overrides in favour of Translator.
+
 type Mapper interface {
 	Map(chartutil.Values) chartutil.Values
 }
