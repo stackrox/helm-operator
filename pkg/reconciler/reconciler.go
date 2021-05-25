@@ -61,6 +61,7 @@ const uninstallFinalizer = "uninstall-helm-release"
 type Reconciler struct {
 	client             client.Client
 	actionClientGetter helmclient.ActionClientGetter
+	valueTranslator    values.Translator
 	valueMapper        values.Mapper
 	eventRecorder      record.EventRecorder
 	preHooks           []hook.PreHook
@@ -362,8 +363,20 @@ func WithPostHook(h hook.PostHook) Option {
 	}
 }
 
+// WithValueTranslator is an Option that configures a function that translates a
+// custom resource to the values passed to Helm.
+// Use this if you need to customize the logic that translates your custom resource to Helm values.
+func WithValueTranslator(t values.Translator) Option {
+	return func(r *Reconciler) error {
+		r.valueTranslator = t
+		return nil
+	}
+}
+
 // WithValueMapper is an Option that configures a function that maps values
-// from a custom resource spec to the values passed to Helm
+// from a custom resource spec to the values passed to Helm.
+// Use this if you want to apply a transformation on the values obtained from your custom resource, before
+// they are passed to Helm.
 func WithValueMapper(m values.Mapper) Option {
 	return func(r *Reconciler) error {
 		r.valueMapper = m
@@ -522,14 +535,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 }
 
 func (r *Reconciler) getValues(obj *unstructured.Unstructured) (chartutil.Values, error) {
-	crVals, err := internalvalues.FromUnstructured(obj)
+	vals, err := r.valueTranslator.Translate(obj)
 	if err != nil {
 		return chartutil.Values{}, err
 	}
+	crVals := internalvalues.New(vals)
 	if err := crVals.ApplyOverrides(r.overrideValues); err != nil {
 		return chartutil.Values{}, err
 	}
-	vals := r.valueMapper.Map(crVals.Map())
+	vals = r.valueMapper.Map(crVals.Map())
 	vals, err = chartutil.CoalesceValues(r.chrt, vals)
 	if err != nil {
 		return chartutil.Values{}, err
@@ -735,6 +749,9 @@ func (r *Reconciler) addDefaults(mgr ctrl.Manager, controllerName string) {
 	}
 	if r.eventRecorder == nil {
 		r.eventRecorder = mgr.GetEventRecorderFor(controllerName)
+	}
+	if r.valueTranslator == nil {
+		r.valueTranslator = internalvalues.DefaultTranslator
 	}
 	if r.valueMapper == nil {
 		r.valueMapper = internalvalues.DefaultMapper
