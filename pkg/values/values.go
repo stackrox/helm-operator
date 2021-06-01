@@ -17,6 +17,7 @@ limitations under the License.
 package values
 
 import (
+	"context"
 	"helm.sh/helm/v3/pkg/chartutil"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -34,11 +35,11 @@ func (m MapperFunc) Map(v chartutil.Values) chartutil.Values {
 }
 
 type Translator interface {
-	Translate(unstructured *unstructured.Unstructured) (chartutil.Values, error)
+	Translate(ctx context.Context, unstructured *unstructured.Unstructured) (chartutil.Values, error)
 }
 
-type TranslatorFunc func(*unstructured.Unstructured) (chartutil.Values, error)
+type TranslatorFunc func(context.Context, *unstructured.Unstructured) (chartutil.Values, error)
 
-func (t TranslatorFunc) Translate(u *unstructured.Unstructured) (chartutil.Values, error) {
-	return t(u)
+func (t TranslatorFunc) Translate(ctx context.Context, u *unstructured.Unstructured) (chartutil.Values, error) {
+	return t(ctx, u)
 }
