@@ -471,7 +471,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 		return ctrl.Result{}, err
 	}
 
-	vals, err := r.getValues(obj)
+	vals, err := r.getValues(ctx, obj)
 	if err != nil {
 		u.UpdateStatus(
 			updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionTrue, conditions.ReasonErrorGettingValues, err)),
@@ -534,8 +534,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 	return ctrl.Result{RequeueAfter: r.reconcilePeriod}, nil
 }
 
-func (r *Reconciler) getValues(obj *unstructured.Unstructured) (chartutil.Values, error) {
-	vals, err := r.valueTranslator.Translate(obj)
+func (r *Reconciler) getValues(ctx context.Context, obj *unstructured.Unstructured) (chartutil.Values, error) {
+	vals, err := r.valueTranslator.Translate(ctx, obj)
 	if err != nil {
 		return chartutil.Values{}, err
 	}
