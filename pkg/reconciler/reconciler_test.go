@@ -397,7 +397,7 @@ var _ = Describe("Reconciler", func() {
 				}),
 			)
 			Expect(err).To(BeNil())
-			Expect(r.SetupWithManager(mgr)).To(Succeed())
+			Expect(r.SetupWithManager(mgr, SetupOpts{})).To(Succeed())
 
 			ac, err = r.actionClientGetter.ActionClientFor(obj)
 			Expect(err).To(BeNil())

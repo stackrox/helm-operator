@@ -116,6 +116,10 @@ func (r *Reconciler) setupAnnotationMaps() {
 	r.uninstallAnnotations = make(map[string]annotation.Uninstall)
 }
 
+type SetupOpts struct {
+	DisableSetupScheme bool
+}
+
 // SetupWithManager configures a controller for the Reconciler and registers
 // watches. It also uses the passed Manager to initialize default values for the
 // Reconciler and sets up the manager's scheme with the Reconciler's configured
@@ -123,11 +127,13 @@ func (r *Reconciler) setupAnnotationMaps() {
 //
 // If an error occurs setting up the Reconciler with the manager, it is
 // returned.
-func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *Reconciler) SetupWithManager(mgr ctrl.Manager, opts SetupOpts) error {
 	controllerName := fmt.Sprintf("%v-controller", strings.ToLower(r.gvk.Kind))
 
 	r.addDefaults(mgr, controllerName)
-	r.setupScheme(mgr)
+	if !opts.DisableSetupScheme {
+		r.setupScheme(mgr)
+	}
 
 	c, err := controller.New(controllerName, mgr, controller.Options{Reconciler: r, MaxConcurrentReconciles: r.maxConcurrentReconciles})
 	if err != nil {
