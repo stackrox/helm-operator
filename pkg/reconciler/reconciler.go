@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/joelanford/helm-operator/pkg/extensions"
 	"strings"
 	"sync"
 	"time"
@@ -66,6 +67,9 @@ type Reconciler struct {
 	eventRecorder      record.EventRecorder
 	preHooks           []hook.PreHook
 	postHooks          []hook.PostHook
+
+	preExtensions  []extensions.ReconcileExtension
+	postExtensions []extensions.ReconcileExtension
 
 	log                     logr.Logger
 	gvk                     *schema.GroupVersionKind
@@ -354,11 +358,36 @@ func WithPreHook(h hook.PreHook) Option {
 	}
 }
 
+// WithPreExtension is an Option that configures the reconciler to run the given
+// extension before performing any reconciliation steps (including values translation).
+// The extension will be invoked with the raw object state; meaning it is responsible
+// for determining if a deletion needs to be performed by checking the deletionTimestamp
+// field.
+func WithPreExtension(e extensions.ReconcileExtension) Option {
+	return func(r *Reconciler) error {
+		r.preExtensions = append(r.preExtensions, e)
+		return nil
+	}
+}
+
 // WithPostHook is an Option that configures the reconciler to run the given
 // PostHook just after performing any non-uninstall release actions.
 func WithPostHook(h hook.PostHook) Option {
 	return func(r *Reconciler) error {
 		r.postHooks = append(r.postHooks, h)
+		return nil
+	}
+}
+
+// WithPostExtension is an Option that configures the reconciler to run the given
+// extension after performing any reconciliation steps (including uninstall of the release,
+// but not removal of the finalizer).
+// The extension will be invoked with the raw object state; meaning it is responsible
+// for determining if a deletion needs to be performed by checking the deletionTimestamp
+// field.
+func WithPostExtension(e extensions.ReconcileExtension) Option {
+	return func(r *Reconciler) error {
+		r.postExtensions = append(r.postExtensions, e)
 		return nil
 	}
 }
@@ -466,6 +495,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 	}
 	u.UpdateStatus(updater.EnsureCondition(conditions.Initialized(corev1.ConditionTrue, "", "")))
 
+	for _, ext := range r.preExtensions {
+		if err := ext(ctx, *obj, r.log); err != nil {
+			u.UpdateStatus(
+				updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionTrue, conditions.ReasonReconcileError, err)),
+				updater.EnsureConditionUnknown(conditions.TypeReleaseFailed),
+			)
+			return ctrl.Result{}, err
+		}
+	}
+
 	if obj.GetDeletionTimestamp() != nil {
 		err := r.handleDeletion(ctx, actionClient, obj, log)
 		return ctrl.Result{}, err
@@ -525,6 +564,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 		}
 	}
 
+	for _, ext := range r.postExtensions {
+		if err := ext(ctx, *obj, r.log); err != nil {
+			u.UpdateStatus(
+				updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionTrue, conditions.ReasonReconcileError, err)),
+				updater.EnsureConditionUnknown(conditions.TypeReleaseFailed),
+			)
+			return ctrl.Result{}, err
+		}
+	}
+
 	ensureDeployedRelease(&u, rel)
 	u.UpdateStatus(
 		updater.EnsureCondition(conditions.ReleaseFailed(corev1.ConditionFalse, "", "")),
@@ -580,7 +629,7 @@ func (r *Reconciler) handleDeletion(ctx context.Context, actionClient helmclient
 				err = applyErr
 			}
 		}()
-		return r.doUninstall(actionClient, &uninstallUpdater, obj, log)
+		return r.doUninstall(ctx, actionClient, &uninstallUpdater, obj, log)
 	}(); err != nil {
 		return err
 	}
@@ -697,7 +746,7 @@ func (r *Reconciler) doReconcile(actionClient helmclient.ActionInterface, u *upd
 	return nil
 }
 
-func (r *Reconciler) doUninstall(actionClient helmclient.ActionInterface, u *updater.Updater, obj *unstructured.Unstructured, log logr.Logger) error {
+func (r *Reconciler) doUninstall(ctx context.Context, actionClient helmclient.ActionInterface, u *updater.Updater, obj *unstructured.Unstructured, log logr.Logger) error {
 	var opts []helmclient.UninstallOption
 	for name, annot := range r.uninstallAnnotations {
 		if v, ok := obj.GetAnnotations()[name]; ok {
@@ -717,6 +766,17 @@ func (r *Reconciler) doUninstall(actionClient helmclient.ActionInterface, u *upd
 	} else {
 		log.Info("Release uninstalled", "name", resp.Release.Name, "version", resp.Release.Version)
 	}
+
+	for _, ext := range r.postExtensions {
+		if err := ext(ctx, *obj, r.log); err != nil {
+			u.UpdateStatus(
+				updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionTrue, conditions.ReasonReconcileError, err)),
+				updater.EnsureConditionUnknown(conditions.TypeReleaseFailed),
+			)
+			return err
+		}
+	}
+
 	u.Update(updater.RemoveFinalizer(uninstallFinalizer))
 	u.UpdateStatus(
 		updater.EnsureCondition(conditions.ReleaseFailed(corev1.ConditionFalse, "", "")),
