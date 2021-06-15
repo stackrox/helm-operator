@@ -360,9 +360,8 @@ func WithPreHook(h hook.PreHook) Option {
 
 // WithPreExtension is an Option that configures the reconciler to run the given
 // extension before performing any reconciliation steps (including values translation).
-// The extension will be invoked with the raw object state; meaning it is responsible
-// for determining if a deletion needs to be performed by checking the deletionTimestamp
-// field.
+// The extension will be invoked with the raw object state; meaning it needs to be careful
+// to check for existence of the deletionTimestamp field.
 func WithPreExtension(e extensions.ReconcileExtension) Option {
 	return func(r *Reconciler) error {
 		r.preExtensions = append(r.preExtensions, e)
