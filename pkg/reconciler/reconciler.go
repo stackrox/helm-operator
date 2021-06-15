@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/joelanford/helm-operator/pkg/extensions"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +46,7 @@ import (
 
 	"github.com/joelanford/helm-operator/pkg/annotation"
 	helmclient "github.com/joelanford/helm-operator/pkg/client"
+	"github.com/joelanford/helm-operator/pkg/extensions"
 	"github.com/joelanford/helm-operator/pkg/hook"
 	"github.com/joelanford/helm-operator/pkg/internal/sdk/controllerutil"
 	"github.com/joelanford/helm-operator/pkg/reconciler/internal/conditions"
@@ -360,6 +360,9 @@ func WithPreHook(h hook.PreHook) Option {
 
 // WithPreExtension is an Option that configures the reconciler to run the given
 // extension before performing any reconciliation steps (including values translation).
+// An error returned from the extension will cause the reconciliation to fail.
+// This should be preferred to WithPreHook in most cases, except for when the logic
+// depends on the translated Helm values.
 // The extension will be invoked with the raw object state; meaning it needs to be careful
 // to check for existence of the deletionTimestamp field.
 func WithPreExtension(e extensions.ReconcileExtension) Option {
@@ -381,9 +384,12 @@ func WithPostHook(h hook.PostHook) Option {
 // WithPostExtension is an Option that configures the reconciler to run the given
 // extension after performing any reconciliation steps (including uninstall of the release,
 // but not removal of the finalizer).
-// The extension will be invoked with the raw object state; meaning it is responsible
-// for determining if a deletion needs to be performed by checking the deletionTimestamp
-// field.
+// An error returned from the extension will cause the reconciliation to fail, which might
+// prevent the finalizer from getting removed.
+// This should be preferred to WithPostHook in most cases, except for when the logic
+// depends on the translated Helm values.
+// The extension will be invoked with the raw object state; meaning it needs to be careful
+// to check for existence of the deletionTimestamp field.
 func WithPostExtension(e extensions.ReconcileExtension) Option {
 	return func(r *Reconciler) error {
 		r.postExtensions = append(r.postExtensions, e)
