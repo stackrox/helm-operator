@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"strings"
 	"sync"
 	"time"
@@ -561,6 +562,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 			return ctrl.Result{}, err
 		}
 
+	case statedNeedsRollback: {
+		if err := r.doRollback(actionClient, &u, obj); err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	case stateUnchanged:
 		if err := r.doReconcile(actionClient, &u, rel, log); err != nil {
 			return ctrl.Result{}, err
@@ -614,10 +621,11 @@ func (r *Reconciler) getValues(ctx context.Context, obj *unstructured.Unstructur
 type helmReleaseState string
 
 const (
-	stateNeedsInstall helmReleaseState = "needs install"
-	stateNeedsUpgrade helmReleaseState = "needs upgrade"
-	stateUnchanged    helmReleaseState = "unchanged"
-	stateError        helmReleaseState = "error"
+	stateNeedsInstall   helmReleaseState = "needs install"
+	stateNeedsUpgrade   helmReleaseState = "needs upgrade"
+	stateUnchanged      helmReleaseState = "unchanged"
+	stateError          helmReleaseState = "error"
+	statedNeedsRollback helmReleaseState = "needs rollback"
 )
 
 func (r *Reconciler) handleDeletion(ctx context.Context, actionClient helmclient.ActionInterface, obj *unstructured.Unstructured, log logr.Logger) error {
@@ -665,6 +673,14 @@ func (r *Reconciler) getReleaseState(client helmclient.ActionInterface, obj meta
 		return nil, stateNeedsInstall, nil
 	}
 
+	// If the release is pending it is likely that it happened because the helm install/upgrade/rollback action
+	// were cancelled unexpectedly.
+	//TODO(do-not-merge): as pending releases are now rolled back it is necessary to ensure that an in-progress helm release is not cancelled
+	// and this code is only executed to ensure aborted releases are rolled back.
+	if currentRelease.Info.Status.IsPending() {
+		return nil, statedNeedsRollback, nil
+	}
+
 	var opts []helmclient.UpgradeOption
 	for name, annot := range r.upgradeAnnotations {
 		if v, ok := obj.GetAnnotations()[name]; ok {
@@ -679,7 +695,7 @@ func (r *Reconciler) getReleaseState(client helmclient.ActionInterface, obj meta
 	if err != nil {
 		return currentRelease, stateError, err
 	}
-	if specRelease.Manifest != currentRelease.Manifest ||
+	if specRelease.Manifest != fmt.Sprintf("%d%s", rand.Int31(), currentRelease.Manifest) ||
 		currentRelease.Info.Status == release.StatusFailed ||
 		currentRelease.Info.Status == release.StatusSuperseded {
 		return currentRelease, stateNeedsUpgrade, nil
@@ -735,6 +751,22 @@ func (r *Reconciler) reportOverrideEvents(obj runtime.Object) {
 		r.eventRecorder.Eventf(obj, "Warning", "ValueOverridden",
 			"Chart value %q overridden to %q by operator", k, v)
 	}
+}
+
+func (r *Reconciler) doRollback(actionClient helmclient.ActionInterface, u *updater.Updater, obj *unstructured.Unstructured) error {
+	u.UpdateStatus(
+		//TODO(do-not-merge): Add better error message indicating that release was maybe aborted
+		updater.EnsureCondition(conditions.ReleasePending(corev1.ConditionFalse, "", "")),
+	)
+
+	if err := actionClient.Rollback(obj.GetName()); err != nil {
+		u.UpdateStatus(
+			//TODO(do-not-merge): Add better error message indicating that release was maybe aborted with manual steps
+			updater.EnsureCondition(conditions.RollbackFailed(corev1.ConditionFalse, "", err)),
+		)
+		return err
+	}
+	return nil
 }
 
 func (r *Reconciler) doReconcile(actionClient helmclient.ActionInterface, u *updater.Updater, rel *release.Release, log logr.Logger) error {

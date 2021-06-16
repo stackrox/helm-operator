@@ -28,7 +28,9 @@ const (
 	TypeInitialized    = "Initialized"
 	TypeDeployed       = "Deployed"
 	TypeReleaseFailed  = "ReleaseFailed"
+	TypeRollbackFailed = "TypeRollbackFailed"
 	TypeIrreconcilable = "Irreconcilable"
+	TypeReleasePending = "ReleasePending"
 
 	ReasonInstallSuccessful   = status.ConditionReason("InstallSuccessful")
 	ReasonUpgradeSuccessful   = status.ConditionReason("UpgradeSuccessful")
@@ -41,6 +43,7 @@ const (
 	ReasonUpgradeError             = status.ConditionReason("UpgradeError")
 	ReasonReconcileError           = status.ConditionReason("ReconcileError")
 	ReasonUninstallError           = status.ConditionReason("UninstallError")
+	ReasonReleasePending           = status.ConditionReason("ReleasePending")
 )
 
 func Initialized(stat corev1.ConditionStatus, reason status.ConditionReason, message interface{}) status.Condition {
@@ -53,6 +56,14 @@ func Deployed(stat corev1.ConditionStatus, reason status.ConditionReason, messag
 
 func ReleaseFailed(stat corev1.ConditionStatus, reason status.ConditionReason, message interface{}) status.Condition {
 	return newCondition(TypeReleaseFailed, stat, reason, message)
+}
+
+func ReleasePending(stat corev1.ConditionStatus, reason status.ConditionReason, message interface{}) status.Condition {
+	return newCondition(TypeReleasePending, stat, reason, message)
+}
+
+func RollbackFailed(stat corev1.ConditionStatus, reason status.ConditionReason, message interface{}) status.Condition {
+	return newCondition(TypeRollbackFailed, stat, reason, message)
 }
 
 func Irreconcilable(stat corev1.ConditionStatus, reason status.ConditionReason, message interface{}) status.Condition {
