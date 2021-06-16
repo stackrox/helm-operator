@@ -183,7 +183,7 @@ func (c *actionClient) Upgrade(name, namespace string, chrt *chart.Chart, vals m
 
 func (c *actionClient) Rollback(name string, opts ...RollbackOption) error {
 	rollback := action.NewRollback(c.conf)
-	for _, o  := range opts {
+	for _, o := range opts {
 		if err := o(rollback); err != nil {
 			return err
 		}

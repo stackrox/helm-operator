@@ -53,12 +53,14 @@ type ActionClient struct {
 	Upgrades   []UpgradeCall
 	Uninstalls []UninstallCall
 	Reconciles []ReconcileCall
+	Rollbacks  []RollbackCall
 
 	HandleGet       func() (*release.Release, error)
 	HandleInstall   func() (*release.Release, error)
 	HandleUpgrade   func() (*release.Release, error)
 	HandleUninstall func() (*release.UninstallReleaseResponse, error)
 	HandleReconcile func() error
+	HandleRollback  func() error
 }
 
 func NewActionClient() ActionClient {
@@ -118,6 +120,11 @@ type ReconcileCall struct {
 	Release *release.Release
 }
 
+type RollbackCall struct {
+	Name string
+	Opts []client.RollbackOption
+}
+
 func (c *ActionClient) Get(name string, opts ...client.GetOption) (*release.Release, error) {
 	c.Gets = append(c.Gets, GetCall{name, opts})
 	return c.HandleGet()
@@ -141,4 +148,9 @@ func (c *ActionClient) Uninstall(name string, opts ...client.UninstallOption) (*
 func (c *ActionClient) Reconcile(rel *release.Release) error {
 	c.Reconciles = append(c.Reconciles, ReconcileCall{rel})
 	return c.HandleReconcile()
+}
+
+func (c *ActionClient) Rollback(name string, opts ...client.RollbackOption) error {
+	c.Rollbacks = append(c.Rollbacks, RollbackCall{name, opts})
+	return c.HandleRollback()
 }

@@ -57,7 +57,13 @@ import (
 	"github.com/joelanford/helm-operator/pkg/values"
 )
 
-const uninstallFinalizer = "uninstall-helm-release"
+const (
+	uninstallFinalizer    = "uninstall-helm-release"
+	// pendingReleaseTimeout defines the time frame after which a rollback is performed on a given release
+	pendingReleaseTimeout = time.Second * 30
+	// pendingRetryInterval defines the time waiting until the current reconciliation finished to avoid spamming helm actions
+	pendingRetryInterval = time.Second * 5
+)
 
 // Reconciler reconciles a Helm object
 type Reconciler struct {
@@ -562,16 +568,21 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 			return ctrl.Result{}, err
 		}
 
-	case statedNeedsRollback: {
-		if err := r.doRollback(actionClient, &u, obj); err != nil {
-			return ctrl.Result{}, err
+	case statedNeedsRollback:
+		{
+			if err := r.doRollback(actionClient, &u, obj); err != nil {
+				return ctrl.Result{}, err
+			}
 		}
-	}
 
 	case stateUnchanged:
 		if err := r.doReconcile(actionClient, &u, rel, log); err != nil {
 			return ctrl.Result{}, err
 		}
+
+	case stateNeedsSkip:
+		return ctrl.Result{Requeue: true, RequeueAfter: pendingRetryInterval}, nil
+
 	default:
 		return ctrl.Result{}, fmt.Errorf("unexpected release state: %s", state)
 	}
@@ -626,6 +637,7 @@ const (
 	stateUnchanged      helmReleaseState = "unchanged"
 	stateError          helmReleaseState = "error"
 	statedNeedsRollback helmReleaseState = "needs rollback"
+	stateNeedsSkip      helmReleaseState = "needs skip"
 )
 
 func (r *Reconciler) handleDeletion(ctx context.Context, actionClient helmclient.ActionInterface, obj *unstructured.Unstructured, log logr.Logger) error {
@@ -678,6 +690,11 @@ func (r *Reconciler) getReleaseState(client helmclient.ActionInterface, obj meta
 	//TODO(do-not-merge): as pending releases are now rolled back it is necessary to ensure that an in-progress helm release is not cancelled
 	// and this code is only executed to ensure aborted releases are rolled back.
 	if currentRelease.Info.Status.IsPending() {
+		t := time.Now().Sub(currentRelease.Info.LastDeployed.Time)
+		if t <= pendingReleaseTimeout {
+			r.log.Info("Release pending, skipped", "name", currentRelease.Name, "version", currentRelease.Version, "retry_in", pendingRetryInterval.String())
+			return nil, stateNeedsSkip, nil
+		}
 		return nil, statedNeedsRollback, nil
 	}
 
