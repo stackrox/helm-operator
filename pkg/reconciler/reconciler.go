@@ -58,7 +58,7 @@ import (
 )
 
 const (
-	uninstallFinalizer    = "uninstall-helm-release"
+	uninstallFinalizer = "uninstall-helm-release"
 	// pendingReleaseTimeout defines the time frame after which a rollback is performed on a given release
 	pendingReleaseTimeout = time.Second * 30
 	// pendingRetryInterval defines the time waiting until the current reconciliation finished to avoid spamming helm actions
@@ -581,6 +581,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 		}
 
 	case stateNeedsSkip:
+		// TODO(do-not-merge): set status custom resource status
 		return ctrl.Result{Requeue: true, RequeueAfter: pendingRetryInterval}, nil
 
 	default:
