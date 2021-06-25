@@ -20,6 +20,7 @@ import (
 	"context"
 	"helm.sh/helm/v3/pkg/chartutil"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/tools/record"
 )
 
 // TODO: Consider deprecating Mapper and overrides in favour of Translator.
@@ -34,12 +35,16 @@ func (m MapperFunc) Map(v chartutil.Values) chartutil.Values {
 	return m(v)
 }
 
-type Translator interface {
-	Translate(ctx context.Context, unstructured *unstructured.Unstructured) (chartutil.Values, error)
+type TranslatorArgs struct {
+	EventRecoder record.EventRecorder
 }
 
-type TranslatorFunc func(context.Context, *unstructured.Unstructured) (chartutil.Values, error)
+type Translator interface {
+	Translate(ctx context.Context, args TranslatorArgs, unstructured *unstructured.Unstructured) (chartutil.Values, error)
+}
 
-func (t TranslatorFunc) Translate(ctx context.Context, u *unstructured.Unstructured) (chartutil.Values, error) {
-	return t(ctx, u)
+type TranslatorFunc func(context.Context, TranslatorArgs, *unstructured.Unstructured) (chartutil.Values, error)
+
+func (t TranslatorFunc) Translate(ctx context.Context, args TranslatorArgs, u *unstructured.Unstructured) (chartutil.Values, error) {
+	return t(ctx, args, u)
 }

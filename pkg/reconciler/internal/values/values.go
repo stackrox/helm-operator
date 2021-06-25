@@ -70,7 +70,7 @@ func (v *Values) ApplyOverrides(in map[string]string) error {
 
 var DefaultMapper = values.MapperFunc(func(v chartutil.Values) chartutil.Values { return v })
 
-var DefaultTranslator = values.TranslatorFunc(func(ctx context.Context, u *unstructured.Unstructured) (chartutil.Values, error) {
+var DefaultTranslator = values.TranslatorFunc(func(ctx context.Context, args values.TranslatorArgs, u *unstructured.Unstructured) (chartutil.Values, error) {
 	internalValues, err := FromUnstructured(u)
 	if err != nil {
 		return chartutil.Values{}, err

@@ -608,7 +608,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 }
 
 func (r *Reconciler) getValues(ctx context.Context, obj *unstructured.Unstructured) (chartutil.Values, error) {
-	vals, err := r.valueTranslator.Translate(ctx, obj)
+	vals, err := r.valueTranslator.Translate(ctx, values.TranslatorArgs{EventRecoder: r.eventRecorder}, obj)
 	if err != nil {
 		return chartutil.Values{}, err
 	}
