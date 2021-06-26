@@ -51,12 +51,14 @@ type ActionClient struct {
 	Gets       []GetCall
 	Installs   []InstallCall
 	Upgrades   []UpgradeCall
+	Rollbacks  []RollbackCall
 	Uninstalls []UninstallCall
 	Reconciles []ReconcileCall
 
 	HandleGet       func() (*release.Release, error)
 	HandleInstall   func() (*release.Release, error)
 	HandleUpgrade   func() (*release.Release, error)
+	HandleRollback  func() error
 	HandleUninstall func() (*release.UninstallReleaseResponse, error)
 	HandleReconcile func() error
 }
@@ -109,6 +111,11 @@ type UpgradeCall struct {
 	Opts      []client.UpgradeOption
 }
 
+type RollbackCall struct {
+	Name string
+	Opts []client.RollbackOption
+}
+
 type UninstallCall struct {
 	Name string
 	Opts []client.UninstallOption
@@ -131,6 +138,11 @@ func (c *ActionClient) Install(name, namespace string, chrt *chart.Chart, vals m
 func (c *ActionClient) Upgrade(name, namespace string, chrt *chart.Chart, vals map[string]interface{}, opts ...client.UpgradeOption) (*release.Release, error) {
 	c.Upgrades = append(c.Upgrades, UpgradeCall{name, namespace, chrt, vals, opts})
 	return c.HandleUpgrade()
+}
+
+func (c *ActionClient) Rollback(name string, opts ...client.RollbackOption) error {
+	c.Rollbacks = append(c.Rollbacks, RollbackCall{name, opts})
+	return c.HandleRollback()
 }
 
 func (c *ActionClient) Uninstall(name string, opts ...client.UninstallOption) (*release.UninstallReleaseResponse, error) {

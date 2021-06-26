@@ -78,6 +78,7 @@ type Reconciler struct {
 	skipDependentWatches    bool
 	maxConcurrentReconciles int
 	reconcilePeriod         time.Duration
+	autoRollbackAfter       time.Duration
 	maxHistory              int
 
 	annotSetupOnce       sync.Once
@@ -304,6 +305,18 @@ func WithMaxReleaseHistory(maxHistory int) Option {
 	}
 }
 
+// WithAutoRollbackAfter specifies the duration after which the reconciler will attempt to automatically
+// roll back a release that is in a pending (locked) state.
+func WithAutoRollbackAfter(duration time.Duration) Option {
+	return func(r *Reconciler) error {
+		if duration < 0 {
+			return errors.New("auto-rollback after duration must not be negative")
+		}
+		r.autoRollbackAfter = duration
+		return nil
+	}
+}
+
 // WithInstallAnnotations is an Option that configures Install annotations
 // to enable custom action.Install fields to be set based on the value of
 // annotations found in the custom resource watched by this reconciler.
@@ -512,7 +525,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 	// We also make sure not to return any errors we encounter so
 	// we can still attempt an uninstall if the CR is being deleted.
 	rel, err := actionClient.Get(obj.GetName())
-	if errors.Is(err, driver.ErrReleaseNotFound) {
+	if errors.Is(err, driver.ErrReleaseNotFound) || (rel != nil && rel.Info != nil && rel.Info.Status == release.StatusUninstalled) {
 		u.UpdateStatus(updater.EnsureCondition(conditions.Deployed(corev1.ConditionFalse, "", "")))
 	} else if err == nil {
 		ensureDeployedRelease(&u, rel)
@@ -553,6 +566,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 		)
 		return ctrl.Result{}, err
 	}
+	if state == statePending {
+		return r.handlePending(actionClient, rel, &u, log)
+	}
+
 	u.UpdateStatus(updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionFalse, "", "")))
 
 	for _, h := range r.preHooks {
@@ -630,6 +647,7 @@ const (
 	stateNeedsInstall helmReleaseState = "needs install"
 	stateNeedsUpgrade helmReleaseState = "needs upgrade"
 	stateUnchanged    helmReleaseState = "unchanged"
+	statePending      helmReleaseState = "pending"
 	stateError        helmReleaseState = "error"
 )
 
@@ -674,8 +692,12 @@ func (r *Reconciler) getReleaseState(client helmclient.ActionInterface, obj meta
 		return nil, stateError, err
 	}
 
-	if errors.Is(err, driver.ErrReleaseNotFound) {
+	if errors.Is(err, driver.ErrReleaseNotFound) || (currentRelease != nil && currentRelease.Info != nil && currentRelease.Info.Status == release.StatusUninstalled) {
 		return nil, stateNeedsInstall, nil
+	}
+
+	if currentRelease.Info != nil && currentRelease.Info.Status.IsPending() {
+		return nil, statePending, nil
 	}
 
 	var opts []helmclient.UpgradeOption
@@ -753,6 +775,48 @@ func (r *Reconciler) doUpgrade(actionClient helmclient.ActionInterface, u *updat
 
 	log.Info("Release upgraded", "name", rel.Name, "version", rel.Version)
 	return rel, nil
+}
+
+func (r *Reconciler) handlePending(actionClient helmclient.ActionInterface, rel *release.Release, u *updater.Updater, log logr.Logger) (ctrl.Result, error) {
+	err := r.doHandlePending(actionClient, rel, log)
+	if err == nil {
+		err = errors.New("unknown error handling pending release")
+	}
+	u.UpdateStatus(
+		updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionTrue, conditions.ReasonPendingError, err)))
+	return ctrl.Result{}, err
+}
+
+func (r *Reconciler) doHandlePending(actionClient helmclient.ActionInterface, rel *release.Release, log logr.Logger) error {
+	if r.autoRollbackAfter <= 0 {
+		return errors.New("Release is in a pending (locked) state and cannot be modified. User intervention is required.")
+	}
+	if rel.Info == nil || rel.Info.LastDeployed.IsZero() {
+		return errors.New("Release is in a pending (locked) state and lacks 'last deployed' timestamp. User intervention is required.")
+	}
+	if pendingSince := time.Since(rel.Info.LastDeployed.Time); pendingSince < r.autoRollbackAfter {
+		return fmt.Errorf("Release is in a pending (locked) state and cannot currently be modified. Rollback will be attempted in %v.", r.autoRollbackAfter-pendingSince)
+	}
+
+	var fixAction string
+	var fixErr error
+	if rel.Info.Status == release.StatusPendingInstall {
+		fixAction = "uninstall"
+		_, fixErr = actionClient.Uninstall(rel.Name, func(u *action.Uninstall) error {
+			u.KeepHistory = true
+			return nil
+		})
+	} else {
+		fixAction = "rollback"
+		fixErr = actionClient.Rollback(rel.Name, func(r *action.Rollback) error {
+			r.Force = true
+			return nil
+		})
+	}
+	if fixErr != nil {
+		return fmt.Errorf("Release is in a pending (locked) state. An attempted %s failed: %w", fixAction, fixErr)
+	}
+	return fmt.Errorf("Release was in a pending (locked) state. A %s was performed to allow the next reconciliation to succeed.", fixAction)
 }
 
 func (r *Reconciler) reportOverrideEvents(obj runtime.Object) {

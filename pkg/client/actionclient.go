@@ -62,6 +62,7 @@ type ActionInterface interface {
 	Get(name string, opts ...GetOption) (*release.Release, error)
 	Install(name, namespace string, chrt *chart.Chart, vals map[string]interface{}, opts ...InstallOption) (*release.Release, error)
 	Upgrade(name, namespace string, chrt *chart.Chart, vals map[string]interface{}, opts ...UpgradeOption) (*release.Release, error)
+	Rollback(name string, opts ...RollbackOption) error
 	Uninstall(name string, opts ...UninstallOption) (*release.UninstallReleaseResponse, error)
 	Reconcile(rel *release.Release) error
 }
@@ -69,6 +70,7 @@ type ActionInterface interface {
 type GetOption func(*action.Get) error
 type InstallOption func(*action.Install) error
 type UpgradeOption func(*action.Upgrade) error
+type RollbackOption func(*action.Rollback) error
 type UninstallOption func(*action.Uninstall) error
 
 func NewActionClientGetter(acg ActionConfigGetter) ActionClientGetter {
@@ -178,6 +180,17 @@ func (c *actionClient) Upgrade(name, namespace string, chrt *chart.Chart, vals m
 		return nil, err
 	}
 	return rel, nil
+}
+
+func (c *actionClient) Rollback(name string, opts ...RollbackOption) error {
+	rollback := action.NewRollback(c.conf)
+	for _, o := range opts {
+		if err := o(rollback); err != nil {
+			return err
+		}
+	}
+	rollback.Force = true
+	return rollback.Run(name)
 }
 
 func (c *actionClient) Uninstall(name string, opts ...UninstallOption) (*release.UninstallReleaseResponse, error) {
