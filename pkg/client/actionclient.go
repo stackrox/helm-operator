@@ -189,7 +189,6 @@ func (c *actionClient) Rollback(name string, opts ...RollbackOption) error {
 			return err
 		}
 	}
-	rollback.Force = true
 	return rollback.Run(name)
 }
 
