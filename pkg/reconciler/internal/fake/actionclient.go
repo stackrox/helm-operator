@@ -48,19 +48,19 @@ func (hcg *fakeActionClientGetter) ActionClientFor(_ crclient.Object) (client.Ac
 }
 
 type ActionClient struct {
-	Gets       []GetCall
-	Installs   []InstallCall
-	Upgrades   []UpgradeCall
-	Rollbacks  []RollbackCall
-	Uninstalls []UninstallCall
-	Reconciles []ReconcileCall
+	Gets        []GetCall
+	Installs    []InstallCall
+	Upgrades    []UpgradeCall
+	MarkFaileds []MarkFailedCall
+	Uninstalls  []UninstallCall
+	Reconciles  []ReconcileCall
 
-	HandleGet       func() (*release.Release, error)
-	HandleInstall   func() (*release.Release, error)
-	HandleUpgrade   func() (*release.Release, error)
-	HandleRollback  func() error
-	HandleUninstall func() (*release.UninstallReleaseResponse, error)
-	HandleReconcile func() error
+	HandleGet        func() (*release.Release, error)
+	HandleInstall    func() (*release.Release, error)
+	HandleUpgrade    func() (*release.Release, error)
+	HandleMarkFailed func() error
+	HandleUninstall  func() (*release.UninstallReleaseResponse, error)
+	HandleReconcile  func() error
 }
 
 func NewActionClient() ActionClient {
@@ -111,9 +111,9 @@ type UpgradeCall struct {
 	Opts      []client.UpgradeOption
 }
 
-type RollbackCall struct {
-	Name string
-	Opts []client.RollbackOption
+type MarkFailedCall struct {
+	Release *release.Release
+	Reason  string
 }
 
 type UninstallCall struct {
@@ -140,9 +140,9 @@ func (c *ActionClient) Upgrade(name, namespace string, chrt *chart.Chart, vals m
 	return c.HandleUpgrade()
 }
 
-func (c *ActionClient) Rollback(name string, opts ...client.RollbackOption) error {
-	c.Rollbacks = append(c.Rollbacks, RollbackCall{name, opts})
-	return c.HandleRollback()
+func (c *ActionClient) MarkFailed(rel *release.Release, reason string) error {
+	c.MarkFaileds = append(c.MarkFaileds, MarkFailedCall{rel, reason})
+	return c.HandleMarkFailed()
 }
 
 func (c *ActionClient) Uninstall(name string, opts ...client.UninstallOption) (*release.UninstallReleaseResponse, error) {

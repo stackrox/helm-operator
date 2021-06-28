@@ -78,7 +78,7 @@ type Reconciler struct {
 	skipDependentWatches    bool
 	maxConcurrentReconciles int
 	reconcilePeriod         time.Duration
-	autoRollbackAfter       time.Duration
+	markFailedAfter         time.Duration
 	maxHistory              int
 
 	annotSetupOnce       sync.Once
@@ -305,14 +305,14 @@ func WithMaxReleaseHistory(maxHistory int) Option {
 	}
 }
 
-// WithAutoRollbackAfter specifies the duration after which the reconciler will attempt to automatically
-// roll back a release that is in a pending (locked) state.
-func WithAutoRollbackAfter(duration time.Duration) Option {
+// WithMarkFailedAfter specifies the duration after which the reconciler will mark a release in a pending (locked)
+// state as false in order to allow rolling forward.
+func WithMarkFailedAfter(duration time.Duration) Option {
 	return func(r *Reconciler) error {
 		if duration < 0 {
 			return errors.New("auto-rollback after duration must not be negative")
 		}
-		r.autoRollbackAfter = duration
+		r.markFailedAfter = duration
 		return nil
 	}
 }
@@ -788,37 +788,22 @@ func (r *Reconciler) handlePending(actionClient helmclient.ActionInterface, rel 
 }
 
 func (r *Reconciler) doHandlePending(actionClient helmclient.ActionInterface, rel *release.Release, log logr.Logger) error {
-	if r.autoRollbackAfter <= 0 {
+	if r.markFailedAfter <= 0 {
 		return errors.New("Release is in a pending (locked) state and cannot be modified. User intervention is required.")
 	}
 	if rel.Info == nil || rel.Info.LastDeployed.IsZero() {
 		return errors.New("Release is in a pending (locked) state and lacks 'last deployed' timestamp. User intervention is required.")
 	}
-	if pendingSince := time.Since(rel.Info.LastDeployed.Time); pendingSince < r.autoRollbackAfter {
-		return fmt.Errorf("Release is in a pending (locked) state and cannot currently be modified. Rollback will be attempted in %v.", r.autoRollbackAfter-pendingSince)
+	if pendingSince := time.Since(rel.Info.LastDeployed.Time); pendingSince < r.markFailedAfter {
+		return fmt.Errorf("Release is in a pending (locked) state and cannot currently be modified. Release will be marked failed to allow a roll-forward in %v.", r.markFailedAfter-pendingSince)
 	}
 
-	var fixAction string
-	var fixErr error
-	if rel.Info.Status == release.StatusPendingInstall {
-		log.Info("Attempting uninstall for locked release", "releaseName", rel.Name)
-		fixAction = "uninstall"
-		_, fixErr = actionClient.Uninstall(rel.Name, func(u *action.Uninstall) error {
-			u.KeepHistory = true
-			return nil
-		})
-	} else {
-		log.Info("Attempting rollback for locked release", "releaseName", rel.Name)
-		fixAction = "rollback"
-		fixErr = actionClient.Rollback(rel.Name, func(r *action.Rollback) error {
-			r.Force = true
-			return nil
-		})
+	log.Info("Marking release as failed", "releaseName", rel.Name)
+	err := actionClient.MarkFailed(rel, fmt.Sprintf("operator marked pending (locked) release as failed after state did not change for %v", r.markFailedAfter))
+	if err != nil {
+		return fmt.Errorf("Failed to mark pending (locked) release as failed: %w", err)
 	}
-	if fixErr != nil {
-		return fmt.Errorf("Release is in a pending (locked) state. An attempted %s failed: %w", fixAction, fixErr)
-	}
-	return fmt.Errorf("Release was in a pending (locked) state. A %s was performed to allow the next reconciliation to succeed.", fixAction)
+	return nil
 }
 
 func (r *Reconciler) reportOverrideEvents(obj runtime.Object) {

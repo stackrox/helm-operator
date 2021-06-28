@@ -62,7 +62,7 @@ type ActionInterface interface {
 	Get(name string, opts ...GetOption) (*release.Release, error)
 	Install(name, namespace string, chrt *chart.Chart, vals map[string]interface{}, opts ...InstallOption) (*release.Release, error)
 	Upgrade(name, namespace string, chrt *chart.Chart, vals map[string]interface{}, opts ...UpgradeOption) (*release.Release, error)
-	Rollback(name string, opts ...RollbackOption) error
+	MarkFailed(release *release.Release, reason string) error
 	Uninstall(name string, opts ...UninstallOption) (*release.UninstallReleaseResponse, error)
 	Reconcile(rel *release.Release) error
 }
@@ -190,6 +190,14 @@ func (c *actionClient) Rollback(name string, opts ...RollbackOption) error {
 		}
 	}
 	return rollback.Run(name)
+}
+
+func (c *actionClient) MarkFailed(rel *release.Release, reason string) error {
+	infoCopy := *rel.Info
+	releaseCopy := *rel
+	releaseCopy.Info = &infoCopy
+	releaseCopy.SetStatus(release.StatusFailed, reason)
+	return c.conf.Releases.Update(&releaseCopy)
 }
 
 func (c *actionClient) Uninstall(name string, opts ...UninstallOption) (*release.UninstallReleaseResponse, error) {
