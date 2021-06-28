@@ -803,7 +803,7 @@ func (r *Reconciler) doHandlePending(actionClient helmclient.ActionInterface, re
 	if err != nil {
 		return fmt.Errorf("Failed to mark pending (locked) release as failed: %w", err)
 	}
-	return nil
+	return fmt.Errorf("marked release %s as failed to allow upgrade to succeed in next reconcile attempt", rel.Name)
 }
 
 func (r *Reconciler) reportOverrideEvents(obj runtime.Object) {
