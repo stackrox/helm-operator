@@ -697,7 +697,7 @@ func (r *Reconciler) getReleaseState(client helmclient.ActionInterface, obj meta
 	}
 
 	if currentRelease.Info != nil && currentRelease.Info.Status.IsPending() {
-		return nil, statePending, nil
+		return currentRelease, statePending, nil
 	}
 
 	var opts []helmclient.UpgradeOption
