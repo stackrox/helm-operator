@@ -801,12 +801,14 @@ func (r *Reconciler) doHandlePending(actionClient helmclient.ActionInterface, re
 	var fixAction string
 	var fixErr error
 	if rel.Info.Status == release.StatusPendingInstall {
+		log.Info("Attempting uninstall for locked release", "releaseName", rel.Name)
 		fixAction = "uninstall"
 		_, fixErr = actionClient.Uninstall(rel.Name, func(u *action.Uninstall) error {
 			u.KeepHistory = true
 			return nil
 		})
 	} else {
+		log.Info("Attempting rollback for locked release", "releaseName", rel.Name)
 		fixAction = "rollback"
 		fixErr = actionClient.Rollback(rel.Name, func(r *action.Rollback) error {
 			r.Force = true
