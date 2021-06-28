@@ -525,7 +525,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 	// We also make sure not to return any errors we encounter so
 	// we can still attempt an uninstall if the CR is being deleted.
 	rel, err := actionClient.Get(obj.GetName())
-	if errors.Is(err, driver.ErrReleaseNotFound) || (rel != nil && rel.Info != nil && rel.Info.Status == release.StatusUninstalled) {
+	if errors.Is(err, driver.ErrReleaseNotFound) {
 		u.UpdateStatus(updater.EnsureCondition(conditions.Deployed(corev1.ConditionFalse, "", "")))
 	} else if err == nil {
 		ensureDeployedRelease(&u, rel)
@@ -692,7 +692,7 @@ func (r *Reconciler) getReleaseState(client helmclient.ActionInterface, obj meta
 		return nil, stateError, err
 	}
 
-	if errors.Is(err, driver.ErrReleaseNotFound) || (currentRelease != nil && currentRelease.Info != nil && currentRelease.Info.Status == release.StatusUninstalled) {
+	if errors.Is(err, driver.ErrReleaseNotFound) {
 		return nil, stateNeedsInstall, nil
 	}
 

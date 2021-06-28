@@ -70,7 +70,6 @@ type ActionInterface interface {
 type GetOption func(*action.Get) error
 type InstallOption func(*action.Install) error
 type UpgradeOption func(*action.Upgrade) error
-type RollbackOption func(*action.Rollback) error
 type UninstallOption func(*action.Uninstall) error
 
 func NewActionClientGetter(acg ActionConfigGetter) ActionClientGetter {
@@ -180,16 +179,6 @@ func (c *actionClient) Upgrade(name, namespace string, chrt *chart.Chart, vals m
 		return nil, err
 	}
 	return rel, nil
-}
-
-func (c *actionClient) Rollback(name string, opts ...RollbackOption) error {
-	rollback := action.NewRollback(c.conf)
-	for _, o := range opts {
-		if err := o(rollback); err != nil {
-			return err
-		}
-	}
-	return rollback.Run(name)
 }
 
 func (c *actionClient) MarkFailed(rel *release.Release, reason string) error {
