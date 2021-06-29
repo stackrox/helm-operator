@@ -48,17 +48,19 @@ func (hcg *fakeActionClientGetter) ActionClientFor(_ crclient.Object) (client.Ac
 }
 
 type ActionClient struct {
-	Gets       []GetCall
-	Installs   []InstallCall
-	Upgrades   []UpgradeCall
-	Uninstalls []UninstallCall
-	Reconciles []ReconcileCall
+	Gets        []GetCall
+	Installs    []InstallCall
+	Upgrades    []UpgradeCall
+	MarkFaileds []MarkFailedCall
+	Uninstalls  []UninstallCall
+	Reconciles  []ReconcileCall
 
-	HandleGet       func() (*release.Release, error)
-	HandleInstall   func() (*release.Release, error)
-	HandleUpgrade   func() (*release.Release, error)
-	HandleUninstall func() (*release.UninstallReleaseResponse, error)
-	HandleReconcile func() error
+	HandleGet        func() (*release.Release, error)
+	HandleInstall    func() (*release.Release, error)
+	HandleUpgrade    func() (*release.Release, error)
+	HandleMarkFailed func() error
+	HandleUninstall  func() (*release.UninstallReleaseResponse, error)
+	HandleReconcile  func() error
 }
 
 func NewActionClient() ActionClient {
@@ -109,6 +111,11 @@ type UpgradeCall struct {
 	Opts      []client.UpgradeOption
 }
 
+type MarkFailedCall struct {
+	Release *release.Release
+	Reason  string
+}
+
 type UninstallCall struct {
 	Name string
 	Opts []client.UninstallOption
@@ -131,6 +138,11 @@ func (c *ActionClient) Install(name, namespace string, chrt *chart.Chart, vals m
 func (c *ActionClient) Upgrade(name, namespace string, chrt *chart.Chart, vals map[string]interface{}, opts ...client.UpgradeOption) (*release.Release, error) {
 	c.Upgrades = append(c.Upgrades, UpgradeCall{name, namespace, chrt, vals, opts})
 	return c.HandleUpgrade()
+}
+
+func (c *ActionClient) MarkFailed(rel *release.Release, reason string) error {
+	c.MarkFaileds = append(c.MarkFaileds, MarkFailedCall{rel, reason})
+	return c.HandleMarkFailed()
 }
 
 func (c *ActionClient) Uninstall(name string, opts ...client.UninstallOption) (*release.UninstallReleaseResponse, error) {
