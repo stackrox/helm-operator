@@ -53,6 +53,7 @@ type ActionClient struct {
 	Histories  []HistoryCall
 	Installs   []InstallCall
 	Upgrades   []UpgradeCall
+	MarkFailds []MarkFailedCall
 	Uninstalls []UninstallCall
 	Reconciles []ReconcileCall
 
@@ -60,6 +61,7 @@ type ActionClient struct {
 	HandleHistory   func() ([]*release.Release, error)
 	HandleInstall   func() (*release.Release, error)
 	HandleUpgrade   func() (*release.Release, error)
+	HandleMarkFaild func() error
 	HandleUninstall func() (*release.UninstallReleaseResponse, error)
 	HandleReconcile func() error
 }
@@ -82,6 +84,7 @@ func NewActionClient() ActionClient {
 		Histories:  make([]HistoryCall, 0),
 		Installs:   make([]InstallCall, 0),
 		Upgrades:   make([]UpgradeCall, 0),
+		MarkFailds: make([]MarkFailedCall, 0),
 		Uninstalls: make([]UninstallCall, 0),
 		Reconciles: make([]ReconcileCall, 0),
 
@@ -89,6 +92,7 @@ func NewActionClient() ActionClient {
 		HandleHistory:   historyFunc(errors.New("history not implemented")),
 		HandleInstall:   relFunc(errors.New("install not implemented")),
 		HandleUpgrade:   relFunc(errors.New("upgrade not implemented")),
+		HandleMarkFaild: recFunc(errors.New("mark failed not implemented")),
 		HandleUninstall: uninstFunc(errors.New("uninstall not implemented")),
 		HandleReconcile: recFunc(errors.New("reconcile not implemented")),
 	}
@@ -122,6 +126,11 @@ type UpgradeCall struct {
 	Opts      []client.UpgradeOption
 }
 
+type MarkFailedCall struct {
+	Release *release.Release
+	Reason  string
+}
+
 type UninstallCall struct {
 	Name string
 	Opts []client.UninstallOption
@@ -149,6 +158,11 @@ func (c *ActionClient) Install(name, namespace string, chrt *chart.Chart, vals m
 func (c *ActionClient) Upgrade(name, namespace string, chrt *chart.Chart, vals map[string]interface{}, opts ...client.UpgradeOption) (*release.Release, error) {
 	c.Upgrades = append(c.Upgrades, UpgradeCall{name, namespace, chrt, vals, opts})
 	return c.HandleUpgrade()
+}
+
+func (c *ActionClient) MarkFailed(rel *release.Release, reason string) error {
+	c.MarkFailds = append(c.MarkFailds, MarkFailedCall{rel, reason})
+	return c.HandleMarkFaild()
 }
 
 func (c *ActionClient) Uninstall(name string, opts ...client.UninstallOption) (*release.UninstallReleaseResponse, error) {

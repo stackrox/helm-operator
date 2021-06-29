@@ -85,6 +85,7 @@ type Reconciler struct {
 	reconcilePeriod                  time.Duration
 	waitForDeletionTimeout           time.Duration
 	maxReleaseHistory                *int
+	markFailedAfter                  time.Duration
 	skipPrimaryGVKSchemeRegistration bool
 	controllerSetupFuncs             []ControllerSetupFunc
 
@@ -376,6 +377,18 @@ func WithMaxReleaseHistory(maxHistory int) Option {
 			return errors.New("maximum Helm release history size must not be negative")
 		}
 		r.maxReleaseHistory = &maxHistory
+		return nil
+	}
+}
+
+// WithMarkFailedAfter specifies the duration after which the reconciler will mark a release in a pending (locked)
+// state as false in order to allow rolling forward.
+func WithMarkFailedAfter(duration time.Duration) Option {
+	return func(r *Reconciler) error {
+		if duration < 0 {
+			return errors.New("auto-rollback after duration must not be negative")
+		}
+		r.markFailedAfter = duration
 		return nil
 	}
 }
@@ -693,6 +706,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 		)
 		return ctrl.Result{}, err
 	}
+	if state == statePending {
+		return r.handlePending(actionClient, rel, &u, log)
+	}
+
 	u.UpdateStatus(updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionFalse, "", "")))
 
 	for _, h := range r.preHooks {
@@ -769,6 +786,7 @@ const (
 	stateNeedsInstall helmReleaseState = "needs install"
 	stateNeedsUpgrade helmReleaseState = "needs upgrade"
 	stateUnchanged    helmReleaseState = "unchanged"
+	statePending      helmReleaseState = "pending"
 	stateError        helmReleaseState = "error"
 )
 
@@ -816,6 +834,10 @@ func (r *Reconciler) getReleaseState(client helmclient.ActionInterface, obj meta
 
 	if errors.Is(err, driver.ErrReleaseNotFound) {
 		return nil, stateNeedsInstall, nil
+	}
+
+	if currentRelease.Info != nil && currentRelease.Info.Status.IsPending() {
+		return currentRelease, statePending, nil
 	}
 
 	var opts []helmclient.UpgradeOption
@@ -911,6 +933,35 @@ func (r *Reconciler) doUpgrade(actionClient helmclient.ActionInterface, u *updat
 		fmt.Println(diff.Generate(curRel.Manifest, rel.Manifest))
 	}
 	return rel, nil
+}
+
+func (r *Reconciler) handlePending(actionClient helmclient.ActionInterface, rel *release.Release, u *updater.Updater, log logr.Logger) (ctrl.Result, error) { // nolint:unparam
+	err := r.doHandlePending(actionClient, rel, log)
+	if err == nil {
+		err = errors.New("unknown error handling pending release")
+	}
+	u.UpdateStatus(
+		updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionTrue, conditions.ReasonPendingError, err)))
+	return ctrl.Result{}, err
+}
+
+func (r *Reconciler) doHandlePending(actionClient helmclient.ActionInterface, rel *release.Release, log logr.Logger) error {
+	if r.markFailedAfter <= 0 {
+		return errors.New("release is in a pending (locked) state and cannot be modified, user intervention is required")
+	}
+	if rel.Info == nil || rel.Info.LastDeployed.IsZero() {
+		return errors.New("release is in a pending (locked) state and lacks 'last deployed' timestamp, user intervention is required")
+	}
+	if pendingSince := time.Since(rel.Info.LastDeployed.Time); pendingSince < r.markFailedAfter {
+		return fmt.Errorf("release is in a pending (locked) state and cannot currently be modified, will be marked failed to allow a roll-forward in %v", r.markFailedAfter-pendingSince)
+	}
+
+	log.Info("Marking release as failed", "releaseName", rel.Name)
+	err := actionClient.MarkFailed(rel, fmt.Sprintf("operator marked pending (locked) release as failed after state did not change for %v", r.markFailedAfter))
+	if err != nil {
+		return fmt.Errorf("failed to mark pending (locked) release as failed: %w", err)
+	}
+	return fmt.Errorf("marked release %s as failed to allow upgrade to succeed in next reconcile attempt", rel.Name)
 }
 
 func (r *Reconciler) reportOverrideEvents(obj runtime.Object) {
