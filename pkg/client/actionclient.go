@@ -54,6 +54,7 @@ type ActionInterface interface {
 	Get(name string, opts ...GetOption) (*release.Release, error)
 	Install(name, namespace string, chrt *chart.Chart, vals map[string]interface{}, opts ...InstallOption) (*release.Release, error)
 	Upgrade(name, namespace string, chrt *chart.Chart, vals map[string]interface{}, opts ...UpgradeOption) (*release.Release, error)
+	MarkFailed(release *release.Release, reason string) error
 	Uninstall(name string, opts ...UninstallOption) (*release.UninstallReleaseResponse, error)
 	Reconcile(rel *release.Release) error
 }
@@ -276,6 +277,14 @@ func (c *actionClient) Upgrade(name, namespace string, chrt *chart.Chart, vals m
 		return rel, err
 	}
 	return rel, nil
+}
+
+func (c *actionClient) MarkFailed(rel *release.Release, reason string) error {
+	infoCopy := *rel.Info
+	releaseCopy := *rel
+	releaseCopy.Info = &infoCopy
+	releaseCopy.SetStatus(release.StatusFailed, reason)
+	return c.conf.Releases.Update(&releaseCopy)
 }
 
 func (c *actionClient) rollback(name string, opts ...RollbackOption) error {
