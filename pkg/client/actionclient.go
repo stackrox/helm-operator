@@ -268,6 +268,7 @@ func (c *actionClient) rollback(name string, opts ...RollbackOption) error {
 	return rollback.Run(name)
 }
 
+
 func (c *actionClient) Uninstall(name string, opts ...UninstallOption) (*release.UninstallReleaseResponse, error) {
 	return c.uninstall(name, concat(c.defaultUninstallOpts, opts...)...)
 }

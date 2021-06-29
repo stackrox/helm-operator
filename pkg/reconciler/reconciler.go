@@ -83,7 +83,7 @@ type Reconciler struct {
 	extraWatches                     []watchDescription
 	maxConcurrentReconciles          int
 	reconcilePeriod                  time.Duration
-	markFailedAfter                  time.Duration
+	markFailedAfter         		 time.Duration
 	maxHistory                       int
 	skipPrimaryGVKSchemeRegistration bool
 
