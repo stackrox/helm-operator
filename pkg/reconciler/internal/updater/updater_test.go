@@ -114,6 +114,30 @@ var _ = Describe("Updater", func() {
 			Expect(found).To(BeTrue())
 			Expect(err).To(Succeed())
 		})
+
+		It("should preserve any custom status across multiple apply calls", func() {
+			u.UpdateStatusCustom(func(uSt *unstructured.Unstructured) bool {
+				Expect(unstructured.SetNestedMap(uSt.Object, map[string]interface{}{"bar": "baz"}, "foo")).To(Succeed())
+				return true
+			})
+			Expect(u.Apply(context.TODO(), obj)).To(Succeed())
+
+			Expect(client.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
+			val, found, err := unstructured.NestedString(obj.Object, "status", "foo", "bar")
+			Expect(val).To(Equal("baz"))
+			Expect(found).To(BeTrue())
+			Expect(err).To(Succeed())
+
+			u.UpdateStatus(EnsureCondition(conditions.Deployed(corev1.ConditionTrue, "", "")))
+			Expect(u.Apply(context.TODO(), obj)).To(Succeed())
+
+			Expect(client.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
+			Expect((obj.Object["status"].(map[string]interface{}))["conditions"]).To(HaveLen(1))
+			val, found, err = unstructured.NestedString(obj.Object, "status", "foo", "bar")
+			Expect(val).To(Equal("baz"))
+			Expect(found).To(BeTrue())
+			Expect(err).To(Succeed())
+		})
 	})
 })
 
