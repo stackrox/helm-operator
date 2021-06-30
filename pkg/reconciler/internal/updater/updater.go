@@ -174,7 +174,9 @@ func (s *helmAppStatus) updateStatusObject() {
 		s.StatusObject = make(map[string]interface{})
 	}
 	s.StatusObject["conditions"] = unstructuredHelmAppStatus["conditions"]
-	s.StatusObject["deployedRelease"] = unstructuredHelmAppStatus["deployedRelease"]
+	if deployedRelease := unstructuredHelmAppStatus["deployedRelease"]; deployedRelease != nil {
+		s.StatusObject["deployedRelease"] = deployedRelease
+	}
 }
 
 type helmAppRelease struct {

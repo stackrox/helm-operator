@@ -103,16 +103,19 @@ var _ = Describe("Updater", func() {
 			Expect(u.Apply(context.TODO(), obj)).To(Succeed())
 			Expect(client.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
 			Expect((obj.Object["status"].(map[string]interface{}))["conditions"]).To(HaveLen(3))
+			_, found, err := unstructured.NestedFieldNoCopy(obj.Object, "status", "deployedRelease")
+			Expect(found).To(BeFalse())
+			Expect(err).To(Not(HaveOccurred()))
 
 			val, found, err := unstructured.NestedString(obj.Object, "status", "foo", "bar")
 			Expect(val).To(Equal("baz"))
 			Expect(found).To(BeTrue())
-			Expect(err).To(Succeed())
+			Expect(err).To(Not(HaveOccurred()))
 
 			val, found, err = unstructured.NestedString(obj.Object, "status", "foo", "qux")
 			Expect(val).To(Equal("quux"))
 			Expect(found).To(BeTrue())
-			Expect(err).To(Succeed())
+			Expect(err).To(Not(HaveOccurred()))
 		})
 
 		It("should preserve any custom status across multiple apply calls", func() {
@@ -123,6 +126,11 @@ var _ = Describe("Updater", func() {
 			Expect(u.Apply(context.TODO(), obj)).To(Succeed())
 
 			Expect(client.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
+
+			_, found, err := unstructured.NestedFieldNoCopy(obj.Object, "status", "deployedRelease")
+			Expect(found).To(BeFalse())
+			Expect(err).To(Not(HaveOccurred()))
+
 			val, found, err := unstructured.NestedString(obj.Object, "status", "foo", "bar")
 			Expect(val).To(Equal("baz"))
 			Expect(found).To(BeTrue())
@@ -133,6 +141,11 @@ var _ = Describe("Updater", func() {
 
 			Expect(client.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
 			Expect((obj.Object["status"].(map[string]interface{}))["conditions"]).To(HaveLen(1))
+
+			_, found, err = unstructured.NestedFieldNoCopy(obj.Object, "status", "deployedRelease")
+			Expect(found).To(BeFalse())
+			Expect(err).To(Not(HaveOccurred()))
+
 			val, found, err = unstructured.NestedString(obj.Object, "status", "foo", "bar")
 			Expect(val).To(Equal("baz"))
 			Expect(found).To(BeTrue())
