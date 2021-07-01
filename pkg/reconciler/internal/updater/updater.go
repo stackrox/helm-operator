@@ -176,6 +176,8 @@ func (s *helmAppStatus) updateStatusObject() {
 	s.StatusObject["conditions"] = unstructuredHelmAppStatus["conditions"]
 	if deployedRelease := unstructuredHelmAppStatus["deployedRelease"]; deployedRelease != nil {
 		s.StatusObject["deployedRelease"] = deployedRelease
+	} else {
+		delete(s.StatusObject, "deployedRelease")
 	}
 }
 
