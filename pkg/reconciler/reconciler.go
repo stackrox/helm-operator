@@ -623,7 +623,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 	u.UpdateStatus(updater.EnsureCondition(conditions.Initialized(corev1.ConditionTrue, "", "")))
 
 	for _, ext := range r.preExtensions {
-		if err := ext(ctx, obj, r.log); err != nil {
+		if err := ext(ctx, obj, u.UpdateStatusCustom, r.log); err != nil {
 			u.UpdateStatus(
 				updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionTrue, conditions.ReasonReconcileError, err)),
 				updater.EnsureConditionUnknown(conditions.TypeReleaseFailed),
@@ -696,7 +696,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 	}
 
 	for _, ext := range r.postExtensions {
-		if err := ext(ctx, obj, r.log); err != nil {
+		if err := ext(ctx, obj, u.UpdateStatusCustom, r.log); err != nil {
 			u.UpdateStatus(
 				updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionTrue, conditions.ReasonReconcileError, err)),
 				updater.EnsureConditionUnknown(conditions.TypeReleaseFailed),
@@ -944,7 +944,7 @@ func (r *Reconciler) doUninstall(ctx context.Context, actionClient helmclient.Ac
 	}
 
 	for _, ext := range r.postExtensions {
-		if err := ext(ctx, obj, r.log); err != nil {
+		if err := ext(ctx, obj, u.UpdateStatusCustom, r.log); err != nil {
 			u.UpdateStatus(
 				updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionTrue, conditions.ReasonReconcileError, err)),
 				updater.EnsureConditionUnknown(conditions.TypeReleaseFailed),
