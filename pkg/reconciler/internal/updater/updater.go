@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/operator-framework/helm-operator/pkg/extensions"
 	"github.com/operator-framework/helm-operator-plugins/internal/sdk/controllerutil"
 	"github.com/operator-framework/helm-operator-plugins/pkg/internal/status"
 )
@@ -53,6 +54,21 @@ func (u *Updater) UpdateStatus(fs ...UpdateStatusFunc) {
 	u.updateStatusFuncs = append(u.updateStatusFuncs, fs...)
 }
 
+func (u *Updater) UpdateStatusCustom(f extensions.UpdateStatusFunc) {
+	updateFn := func(status *helmAppStatus) bool {
+		status.updateStatusObject()
+
+		unstructuredStatus := unstructured.Unstructured{Object: status.StatusObject}
+		if !f(&unstructuredStatus) {
+			return false
+		}
+		_ = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredStatus.Object, status)
+		status.StatusObject = unstructuredStatus.Object
+		return true
+	}
+	u.UpdateStatus(updateFn)
+}
+
 func (u *Updater) Apply(ctx context.Context, obj *unstructured.Unstructured) error {
 	backoff := retry.DefaultRetry
 
@@ -66,11 +82,8 @@ func (u *Updater) Apply(ctx context.Context, obj *unstructured.Unstructured) err
 			needsStatusUpdate = f(st) || needsStatusUpdate
 		}
 		if needsStatusUpdate {
-			uSt, err := runtime.DefaultUnstructuredConverter.ToUnstructured(st)
-			if err != nil {
-				return err
-			}
-			obj.Object["status"] = uSt
+			st.updateStatusObject()
+			obj.Object["status"] = st.StatusObject
 			return u.client.Status().Update(ctx, obj)
 		}
 		return nil
@@ -149,8 +162,23 @@ func RemoveDeployedRelease() UpdateStatusFunc {
 }
 
 type helmAppStatus struct {
+	StatusObject map[string]interface{} `json:"-"`
+
 	Conditions      status.Conditions `json:"conditions"`
 	DeployedRelease *helmAppRelease   `json:"deployedRelease,omitempty"`
+}
+
+func (s *helmAppStatus) updateStatusObject() {
+	unstructuredHelmAppStatus, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(s)
+	if s.StatusObject == nil {
+		s.StatusObject = make(map[string]interface{})
+	}
+	s.StatusObject["conditions"] = unstructuredHelmAppStatus["conditions"]
+	if deployedRelease := unstructuredHelmAppStatus["deployedRelease"]; deployedRelease != nil {
+		s.StatusObject["deployedRelease"] = deployedRelease
+	} else {
+		delete(s.StatusObject, "deployedRelease")
+	}
 }
 
 type helmAppRelease struct {
@@ -175,6 +203,7 @@ func statusFor(obj *unstructured.Unstructured) *helmAppStatus {
 	case map[string]interface{}:
 		out := &helmAppStatus{}
 		_ = runtime.DefaultUnstructuredConverter.FromUnstructured(s, out)
+		out.StatusObject = s
 		return out
 	default:
 		return &helmAppStatus{}
