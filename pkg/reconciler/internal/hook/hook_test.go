@@ -66,7 +66,7 @@ var _ = Describe("Hook", func() {
 				rel = &release.Release{
 					Manifest: strings.Join([]string{rsOwnerNamespace}, "---\n"),
 				}
-				drw = internalhook.NewDependentResourceWatcher(c, rm)
+				drw = internalhook.NewDependentResourceWatcher(c, rm, true)
 			})
 			It("should fail with an invalid release manifest", func() {
 				rel.Manifest = "---\nfoobar"
@@ -110,7 +110,7 @@ var _ = Describe("Hook", func() {
 				rel = &release.Release{
 					Manifest: strings.Join([]string{clusterRole, clusterRole, rsOwnerNamespace, rsOwnerNamespace}, "---\n"),
 				}
-				drw = internalhook.NewDependentResourceWatcher(c, rm)
+				drw = internalhook.NewDependentResourceWatcher(c, rm, true)
 				Expect(drw.Exec(owner, *rel, log)).To(Succeed())
 				Expect(c.WatchCalls).To(HaveLen(2))
 				Expect(c.WatchCalls[0].Handler).To(BeAssignableToTypeOf(&handler.EnqueueRequestForOwner{}))
@@ -133,7 +133,7 @@ var _ = Describe("Hook", func() {
 					rel = &release.Release{
 						Manifest: strings.Join([]string{rsOwnerNamespace, ssOtherNamespace}, "---\n"),
 					}
-					drw = internalhook.NewDependentResourceWatcher(c, rm)
+					drw = internalhook.NewDependentResourceWatcher(c, rm, true)
 					Expect(drw.Exec(owner, *rel, log)).To(Succeed())
 					Expect(c.WatchCalls).To(HaveLen(2))
 					Expect(c.WatchCalls[0].Handler).To(BeAssignableToTypeOf(&handler.EnqueueRequestForOwner{}))
@@ -144,7 +144,7 @@ var _ = Describe("Hook", func() {
 					rel = &release.Release{
 						Manifest: strings.Join([]string{clusterRole, clusterRoleBinding}, "---\n"),
 					}
-					drw = internalhook.NewDependentResourceWatcher(c, rm)
+					drw = internalhook.NewDependentResourceWatcher(c, rm, true)
 					Expect(drw.Exec(owner, *rel, log)).To(Succeed())
 					Expect(c.WatchCalls).To(HaveLen(2))
 					Expect(c.WatchCalls[0].Handler).To(BeAssignableToTypeOf(&handler.EnqueueRequestForOwner{}))
@@ -154,7 +154,7 @@ var _ = Describe("Hook", func() {
 					rel = &release.Release{
 						Manifest: strings.Join([]string{rsOwnerNamespaceWithKeep, ssOtherNamespaceWithKeep, clusterRoleWithKeep, clusterRoleBindingWithKeep}, "---\n"),
 					}
-					drw = internalhook.NewDependentResourceWatcher(c, rm)
+					drw = internalhook.NewDependentResourceWatcher(c, rm, true)
 					Expect(drw.Exec(owner, *rel, log)).To(Succeed())
 					Expect(c.WatchCalls).To(HaveLen(4))
 					Expect(c.WatchCalls[0].Handler).To(BeAssignableToTypeOf(&sdkhandler.EnqueueRequestForAnnotation{}))
@@ -181,7 +181,7 @@ var _ = Describe("Hook", func() {
 					rel = &release.Release{
 						Manifest: strings.Join([]string{rsOwnerNamespace}, "---\n"),
 					}
-					drw = internalhook.NewDependentResourceWatcher(c, rm)
+					drw = internalhook.NewDependentResourceWatcher(c, rm, true)
 					Expect(drw.Exec(owner, *rel, log)).To(Succeed())
 					Expect(c.WatchCalls).To(HaveLen(1))
 					Expect(c.WatchCalls[0].Handler).To(BeAssignableToTypeOf(&handler.EnqueueRequestForOwner{}))
@@ -190,7 +190,7 @@ var _ = Describe("Hook", func() {
 					rel = &release.Release{
 						Manifest: strings.Join([]string{clusterRole}, "---\n"),
 					}
-					drw = internalhook.NewDependentResourceWatcher(c, rm)
+					drw = internalhook.NewDependentResourceWatcher(c, rm, true)
 					Expect(drw.Exec(owner, *rel, log)).To(Succeed())
 					Expect(c.WatchCalls).To(HaveLen(1))
 					Expect(c.WatchCalls[0].Handler).To(BeAssignableToTypeOf(&sdkhandler.EnqueueRequestForAnnotation{}))
@@ -199,7 +199,7 @@ var _ = Describe("Hook", func() {
 					rel = &release.Release{
 						Manifest: strings.Join([]string{ssOtherNamespace}, "---\n"),
 					}
-					drw = internalhook.NewDependentResourceWatcher(c, rm)
+					drw = internalhook.NewDependentResourceWatcher(c, rm, true)
 					Expect(drw.Exec(owner, *rel, log)).To(Succeed())
 					Expect(c.WatchCalls).To(HaveLen(1))
 					Expect(c.WatchCalls[0].Handler).To(BeAssignableToTypeOf(&sdkhandler.EnqueueRequestForAnnotation{}))
@@ -208,7 +208,7 @@ var _ = Describe("Hook", func() {
 					rel = &release.Release{
 						Manifest: strings.Join([]string{rsOwnerNamespaceWithKeep, ssOtherNamespaceWithKeep, clusterRoleWithKeep}, "---\n"),
 					}
-					drw = internalhook.NewDependentResourceWatcher(c, rm)
+					drw = internalhook.NewDependentResourceWatcher(c, rm, true)
 					Expect(drw.Exec(owner, *rel, log)).To(Succeed())
 					Expect(c.WatchCalls).To(HaveLen(3))
 					Expect(c.WatchCalls[0].Handler).To(BeAssignableToTypeOf(&sdkhandler.EnqueueRequestForAnnotation{}))

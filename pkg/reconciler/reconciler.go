@@ -76,6 +76,7 @@ type Reconciler struct {
 	chrt                    *chart.Chart
 	overrideValues          map[string]string
 	skipDependentWatches    bool
+	extraDependentWatches   []schema.GroupVersionKind
 	maxConcurrentReconciles int
 	reconcilePeriod         time.Duration
 	markFailedAfter         time.Duration
@@ -263,6 +264,16 @@ func WithOverrideValues(overrides map[string]string) Option {
 func SkipDependentWatches(skip bool) Option {
 	return func(r *Reconciler) error {
 		r.skipDependentWatches = skip
+		return nil
+	}
+}
+
+// WithExtraDependentWatches is an option that configures whether the reconciler
+// will watch objects of the given kind. These objects will be watched even if
+// SkipDependentWatches is set to true.
+func WithExtraDependentWatches(gvks ...schema.GroupVersionKind) Option {
+	return func(r *Reconciler) error {
+		r.extraDependentWatches = append(r.extraDependentWatches, gvks...)
 		return nil
 	}
 }
@@ -950,8 +961,8 @@ func (r *Reconciler) setupWatches(mgr ctrl.Manager, c controller.Controller) err
 		return err
 	}
 
-	if !r.skipDependentWatches {
-		r.postHooks = append([]hook.PostHook{internalhook.NewDependentResourceWatcher(c, mgr.GetRESTMapper())}, r.postHooks...)
+	if !r.skipDependentWatches || len(r.extraDependentWatches) > 0 {
+		r.postHooks = append([]hook.PostHook{internalhook.NewDependentResourceWatcher(c, mgr.GetRESTMapper(), !r.skipDependentWatches, r.extraDependentWatches...)}, r.postHooks...)
 	}
 	return nil
 }
