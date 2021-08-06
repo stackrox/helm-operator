@@ -20,7 +20,7 @@ fetch() {
       ;;
     "envtest")
       ver_cmd="cat ${DEST}/.envtest_version 2>/dev/null"
-      fetch_cmd="(test -f ${DEST}/setup-envtest.sh || curl -sSLo ${DEST}/setup-envtest.sh https://raw.githubusercontent.com/kubernetes-sigs/controller-runtime/v${ver}/hack/setup-envtest.sh) && (source ${DEST}/setup-envtest.sh; fetch_envtest_tools ${DEST}/../) && echo ${ver} > ${DEST}/.envtest_version"
+      fetch_cmd="(test -f ${DEST}/setup-envtest.sh || curl -sSLo ${DEST}/setup-envtest.sh https://raw.githubusercontent.com/kubernetes-sigs/controller-runtime/release-0.8/hack/setup-envtest.sh) && (source ${DEST}/setup-envtest.sh; fetch_envtest_tools ${DEST}/../) && echo ${ver} > ${DEST}/.envtest_version"
       ;;
     *)
       echo "unknown tool $tool"
