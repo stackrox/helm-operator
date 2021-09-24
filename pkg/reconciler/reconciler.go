@@ -489,11 +489,14 @@ func WithValueMapper(m values.Mapper) Option {
 //   - Irreconcilable - an error occurred during reconciliation
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.Result, err error) {
 	log := r.log.WithValues(strings.ToLower(r.gvk.Kind), req.NamespacedName)
+	debugLog := log.V(1)
+	debugLog.Info("reconciling...")
 
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(*r.gvk)
 	err = r.client.Get(ctx, req.NamespacedName, obj)
 	if apierrors.IsNotFound(err) {
+		debugLog.Info("resource not found, nothing to do")
 		return ctrl.Result{}, nil
 	}
 	if err != nil {
