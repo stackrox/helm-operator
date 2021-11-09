@@ -37,18 +37,22 @@ import (
 	"github.com/joelanford/helm-operator/pkg/manifestutil"
 )
 
-func NewDependentResourceWatcher(c controller.Controller, rm meta.RESTMapper) hook.PostHook {
+func NewDependentResourceWatcher(c controller.Controller, rm meta.RESTMapper, watchReleaseResources bool, extraWatches ...schema.GroupVersionKind) hook.PostHook {
 	return &dependentResourceWatcher{
-		controller: c,
-		restMapper: rm,
-		m:          sync.Mutex{},
-		watches:    make(map[schema.GroupVersionKind]struct{}),
+		controller:            c,
+		restMapper:            rm,
+		watchReleaseResources: watchReleaseResources,
+		extraWatches:          extraWatches,
+		m:                     sync.Mutex{},
+		watches:               make(map[schema.GroupVersionKind]struct{}),
 	}
 }
 
 type dependentResourceWatcher struct {
-	controller controller.Controller
-	restMapper meta.RESTMapper
+	controller            controller.Controller
+	restMapper            meta.RESTMapper
+	watchReleaseResources bool
+	extraWatches          []schema.GroupVersionKind
 
 	m       sync.Mutex
 	watches map[schema.GroupVersionKind]struct{}
@@ -58,16 +62,31 @@ func (d *dependentResourceWatcher) Exec(owner *unstructured.Unstructured, rel re
 	// using predefined functions for filtering events
 	dependentPredicate := predicate.DependentPredicateFuncs()
 
-	resources := releaseutil.SplitManifests(rel.Manifest)
+	var allWatches []unstructured.Unstructured
+	if d.watchReleaseResources {
+		resources := releaseutil.SplitManifests(rel.Manifest)
+		for _, r := range resources {
+			var obj unstructured.Unstructured
+			err := yaml.Unmarshal([]byte(r), &obj)
+			if err != nil {
+				return err
+			}
+
+			allWatches = append(allWatches, obj)
+		}
+	}
+
+	// For extra watches, we only support same namespace
+	for _, extraWatchGVK := range d.extraWatches {
+		var obj unstructured.Unstructured
+		obj.SetGroupVersionKind(extraWatchGVK)
+		obj.SetNamespace(owner.GetNamespace())
+		allWatches = append(allWatches, obj)
+	}
+
 	d.m.Lock()
 	defer d.m.Unlock()
-	for _, r := range resources {
-		var obj unstructured.Unstructured
-		err := yaml.Unmarshal([]byte(r), &obj)
-		if err != nil {
-			return err
-		}
-
+	for _, obj := range allWatches {
 		depGVK := obj.GroupVersionKind()
 		if _, ok := d.watches[depGVK]; ok || depGVK.Empty() {
 			continue
