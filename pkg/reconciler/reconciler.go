@@ -476,7 +476,7 @@ func WithValueMapper(m values.Mapper) Option {
 // the helm release secret, or resources created by your helm chart.
 // The meaning of the arguments is the same as for sigs.k8s.io/controller-runtime/pkg/controller.Controller Watch
 // function.
-func WithExtraWatch(src source.Source, handler handler.EventHandler, predicates... predicate.Predicate) Option {
+func WithExtraWatch(src source.Source, handler handler.EventHandler, predicates ...predicate.Predicate) Option {
 	return func(r *Reconciler) error {
 		r.extraWatches = append(r.extraWatches, watchDescription{
 			src:        src,
