@@ -472,7 +472,7 @@ func WithValueMapper(m values.Mapper) Option {
 }
 
 // WithExtraWatch is an Option that adds an extra event watch.
-// Use this is you want your controller to respond to events other than coming from the primary custom resource,
+// Use this if you want your controller to respond to events other than coming from the primary custom resource,
 // the helm release secret, or resources created by your helm chart.
 // The meaning of the arguments is the same as for sigs.k8s.io/controller-runtime/pkg/controller.Controller Watch
 // function.
