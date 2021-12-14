@@ -43,6 +43,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
@@ -80,6 +81,7 @@ type Reconciler struct {
 	selectorPredicate                predicate.Predicate
 	overrideValues                   map[string]string
 	skipDependentWatches             bool
+	extraWatches            []watchDescription
 	maxConcurrentReconciles          int
 	reconcilePeriod                  time.Duration
 	markFailedAfter         		 time.Duration
@@ -93,6 +95,12 @@ type Reconciler struct {
 	installAnnotations   map[string]annotation.Install
 	upgradeAnnotations   map[string]annotation.Upgrade
 	uninstallAnnotations map[string]annotation.Uninstall
+}
+
+type watchDescription struct {
+	src        source.Source
+	predicates []predicate.Predicate
+	handler    handler.EventHandler
 }
 
 // New creates a new Reconciler that reconciles custom resources that define a
@@ -522,6 +530,22 @@ func WithValueTranslator(t values.Translator) Option {
 func WithValueMapper(m values.Mapper) Option {
 	return func(r *Reconciler) error {
 		r.valueMapper = m
+		return nil
+	}
+}
+
+// WithExtraWatch is an Option that adds an extra event watch.
+// Use this if you want your controller to respond to events other than coming from the primary custom resource,
+// the helm release secret, or resources created by your helm chart.
+// The meaning of the arguments is the same as for sigs.k8s.io/controller-runtime/pkg/controller.Controller Watch
+// function.
+func WithExtraWatch(src source.Source, handler handler.EventHandler, predicates ...predicate.Predicate) Option {
+	return func(r *Reconciler) error {
+		r.extraWatches = append(r.extraWatches, watchDescription{
+			src:        src,
+			predicates: predicates,
+			handler:    handler,
+		})
 		return nil
 	}
 }
@@ -1054,6 +1078,12 @@ func (r *Reconciler) setupWatches(mgr ctrl.Manager, c controller.Controller) err
 		},
 	); err != nil {
 		return err
+	}
+
+	for _, w := range r.extraWatches {
+		if err := c.Watch(w.src, w.handler, w.predicates...); err != nil {
+			return err
+		}
 	}
 
 	if !r.skipDependentWatches {
