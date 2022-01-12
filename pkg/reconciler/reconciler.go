@@ -84,6 +84,7 @@ type Reconciler struct {
 	maxHistory              int
 
 	stripManifestFromStatus bool
+	skipSchemeSetup         bool
 
 	annotSetupOnce       sync.Once
 	annotations          map[string]struct{}
@@ -132,10 +133,6 @@ func (r *Reconciler) setupAnnotationMaps() {
 	r.uninstallAnnotations = make(map[string]annotation.Uninstall)
 }
 
-type SetupOpts struct {
-	DisableSetupScheme bool
-}
-
 // SetupWithManager configures a controller for the Reconciler and registers
 // watches. It also uses the passed Manager to initialize default values for the
 // Reconciler and sets up the manager's scheme with the Reconciler's configured
@@ -143,11 +140,11 @@ type SetupOpts struct {
 //
 // If an error occurs setting up the Reconciler with the manager, it is
 // returned.
-func (r *Reconciler) SetupWithManager(mgr ctrl.Manager, opts SetupOpts) error {
+func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	controllerName := fmt.Sprintf("%v-controller", strings.ToLower(r.gvk.Kind))
 
 	r.addDefaults(mgr, controllerName)
-	if !opts.DisableSetupScheme {
+	if !r.skipSchemeSetup {
 		r.setupScheme(mgr)
 	}
 
@@ -271,6 +268,17 @@ func WithOverrideValues(overrides map[string]string) Option {
 func SkipDependentWatches(skip bool) Option {
 	return func(r *Reconciler) error {
 		r.skipDependentWatches = skip
+		return nil
+	}
+}
+
+// SkipSchemeSetup is an Option that configures whether the the Manager's
+// Scheme is to be set up in a generic way as part of the Reconciler setup.
+//
+// By default, skipping of the scheme setup is disabled.
+func SkipSchemeSetup(skip bool) Option {
+	return func(r *Reconciler) error {
+		r.skipSchemeSetup = skip
 		return nil
 	}
 }

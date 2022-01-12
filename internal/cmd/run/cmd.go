@@ -169,7 +169,7 @@ func (r *run) run(cmd *cobra.Command) {
 			os.Exit(1)
 		}
 
-		if err := r.SetupWithManager(mgr, reconciler.SetupOpts{}); err != nil {
+		if err := r.SetupWithManager(mgr); err != nil {
 			log.Error(err, "unable to create controller", "controller", "Helm")
 			os.Exit(1)
 		}
