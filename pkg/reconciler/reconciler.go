@@ -43,20 +43,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/operator-framework/helm-operator-plugins/internal/sdk/controllerutil"
 	"github.com/operator-framework/helm-operator-plugins/pkg/annotation"
 	helmclient "github.com/operator-framework/helm-operator-plugins/pkg/client"
+	"github.com/operator-framework/helm-operator-plugins/pkg/extensions"
 	"github.com/operator-framework/helm-operator-plugins/pkg/hook"
 	"github.com/operator-framework/helm-operator-plugins/pkg/reconciler/internal/conditions"
 	internalhook "github.com/operator-framework/helm-operator-plugins/pkg/reconciler/internal/hook"
 	"github.com/operator-framework/helm-operator-plugins/pkg/reconciler/internal/updater"
 	internalvalues "github.com/operator-framework/helm-operator-plugins/pkg/reconciler/internal/values"
 	"github.com/operator-framework/helm-operator-plugins/pkg/values"
-	"github.com/joelanford/helm-operator/pkg/extensions"
 )
 
 const uninstallFinalizer = "uninstall-helm-release"
@@ -80,10 +79,10 @@ type Reconciler struct {
 	selectorPredicate                predicate.Predicate
 	overrideValues                   map[string]string
 	skipDependentWatches             bool
-	extraWatches            []watchDescription
+	extraWatches                     []watchDescription
 	maxConcurrentReconciles          int
 	reconcilePeriod                  time.Duration
-	markFailedAfter         		 time.Duration
+	markFailedAfter                  time.Duration
 	maxHistory                       int
 	skipPrimaryGVKSchemeRegistration bool
 
