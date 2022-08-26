@@ -43,7 +43,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	ctrlpredicate "sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/operator-framework/helm-operator-plugins/internal/sdk/controllerutil"
@@ -77,6 +76,7 @@ type Reconciler struct {
 	gvk                              *schema.GroupVersionKind
 	chrt                             *chart.Chart
 	selectorPredicate                predicate.Predicate
+	extraPredicates                  []predicate.Predicate
 	overrideValues                   map[string]string
 	skipDependentWatches             bool
 	extraWatches                     []watchDescription
@@ -548,11 +548,18 @@ func WithExtraWatch(src source.Source, handler handler.EventHandler, predicates 
 	}
 }
 
+func WithExtraPredicate(predicate predicate.Predicate) Option {
+	return func(r *Reconciler) error {
+		r.extraPredicates = append(r.extraPredicates, predicate)
+		return nil
+	}
+}
+
 // WithSelector is an Option that configures the reconciler to creates a
 // predicate that is used to filter resources based on the specified selector
 func WithSelector(s metav1.LabelSelector) Option {
 	return func(r *Reconciler) error {
-		p, err := ctrlpredicate.LabelSelectorPredicate(s)
+		p, err := predicate.LabelSelectorPredicate(s)
 		if err != nil {
 			return err
 		}
@@ -1026,7 +1033,7 @@ func (r *Reconciler) setupWatches(mgr ctrl.Manager, c controller.Controller) err
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(*r.gvk)
 
-	var preds []ctrlpredicate.Predicate
+	preds := r.extraPredicates
 	if r.selectorPredicate != nil {
 		preds = append(preds, r.selectorPredicate)
 	}
