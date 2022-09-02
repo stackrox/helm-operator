@@ -89,11 +89,12 @@ type Reconciler struct {
 
 	stripManifestFromStatus bool
 
-	annotSetupOnce       sync.Once
-	annotations          map[string]struct{}
-	installAnnotations   map[string]annotation.Install
-	upgradeAnnotations   map[string]annotation.Upgrade
-	uninstallAnnotations map[string]annotation.Uninstall
+	annotSetupOnce           sync.Once
+	annotations              map[string]struct{}
+	installAnnotations       map[string]annotation.Install
+	upgradeAnnotations       map[string]annotation.Upgrade
+	uninstallAnnotations     map[string]annotation.Uninstall
+	pauseReconcileAnnotation string
 }
 
 type watchDescription struct {
@@ -447,6 +448,18 @@ func WithUninstallAnnotations(as ...annotation.Uninstall) Option {
 	}
 }
 
+// WithPauseReconcileAnnotation is an Option that configures and enables
+// a PauseReconcile annotation. If the Custom Resource watched by this
+// reconciler has the given annotation, and its value is set to `true`,
+// then reconciliation for this CR will not be performed until this annotation
+// is removed.
+func WithPauseReconcileAnnotation(annotationName string) Option {
+	return func(r *Reconciler) error {
+		r.pauseReconcileAnnotation = annotationName
+		return nil
+	}
+}
+
 // WithPreHook is an Option that configures the reconciler to run the given
 // PreHook just before performing any actions (e.g. install, upgrade, uninstall,
 // or reconciliation).
@@ -608,6 +621,20 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 			err = applyErr
 		}
 	}()
+
+	if r.pauseReconcileAnnotation != "" {
+		if v, ok := obj.GetAnnotations()[r.pauseReconcileAnnotation]; ok {
+			if v == "true" {
+				log.Info(fmt.Sprintf("Resource has '%s' annotation set to 'true', reconcile stopped", r.pauseReconcileAnnotation))
+				u.UpdateStatus(
+					updater.EnsureCondition(conditions.Paused(corev1.ConditionTrue, conditions.ReasonPauseReconcileAnnotationSet, "")))
+				return ctrl.Result{}, nil
+			}
+		}
+	}
+
+	u.UpdateStatus(
+		updater.EnsureCondition(conditions.Paused(corev1.ConditionFalse, "", "")))
 
 	actionClient, err := r.actionClientGetter.ActionClientFor(obj)
 	if err != nil {
