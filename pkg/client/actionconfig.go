@@ -19,6 +19,7 @@ package client
 import (
 	"context"
 	"fmt"
+
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/go-logr/logr"
@@ -67,7 +68,7 @@ func NewActionConfigGetter(cfg *rest.Config, rm meta.RESTMapper, log logr.Logger
 		kubeClient:       kc,
 		kubeClientSet:    kcs,
 		debugLog:         debugLog,
-		restClientGetter: rcg,
+		restClientGetter: rcg.restClientGetter,
 	}
 }
 
