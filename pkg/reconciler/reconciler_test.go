@@ -135,10 +135,9 @@ var _ = Describe("Reconciler", func() {
 		})
 		var _ = Describe("WithActionClientGetter", func() {
 			It("should set the reconciler action client getter", func() {
-				cfgGetter := helmclient.NewActionConfigGetter(nil, nil, logr.Discard())
-				acg := helmclient.NewActionClientGetter(cfgGetter)
-				Expect(WithActionClientGetter(acg)(r)).To(Succeed())
-				Expect(r.actionClientGetter).To(Equal(acg))
+				fakeActionClientGetter := helmfake.NewActionClientGetter(nil, nil)
+				Expect(WithActionClientGetter(fakeActionClientGetter)(r)).To(Succeed())
+				Expect(r.actionClientGetter).To(Equal(fakeActionClientGetter))
 			})
 		})
 		var _ = Describe("WithEventRecorder", func() {
