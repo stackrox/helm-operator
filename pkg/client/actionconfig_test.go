@@ -29,7 +29,7 @@ import (
 var _ = Describe("ActionConfig", func() {
 	var _ = Describe("NewActionConfigGetter", func() {
 		It("should return a valid ActionConfigGetter", func() {
-			Expect(NewActionConfigGetter(nil, nil, logr.Discard())).NotTo(BeNil())
+			Expect(NewActionConfigGetter(cfg, nil, logr.Discard())).NotTo(BeNil())
 		})
 	})
 
