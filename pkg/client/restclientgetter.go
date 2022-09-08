@@ -30,7 +30,7 @@ import (
 
 var _ genericclioptions.RESTClientGetter = &restClientGetter{}
 
-func newRESTClientGetter(cfg *rest.Config, rm meta.RESTMapper, ns string) genericclioptions.RESTClientGetter {
+func newRESTClientGetter(cfg *rest.Config, rm meta.RESTMapper, ns string) *restClientGetter {
 	return &restClientGetter{
 		restConfig:      cfg,
 		restMapper:      rm,
@@ -74,6 +74,22 @@ func (c *restClientGetter) ToRESTMapper() (meta.RESTMapper, error) {
 }
 
 func (c *restClientGetter) ToRawKubeConfigLoader() clientcmd.ClientConfig {
+	return c.namespaceConfig
+}
+
+func (c *restClientGetter) ForNamespace(ns string) genericclioptions.RESTClientGetter {
+	return &namespacedRCG{
+		restClientGetter: c,
+		namespaceConfig:  namespaceClientConfig{namespace: ns},
+	}
+}
+
+type namespacedRCG struct {
+	*restClientGetter
+	namespaceConfig namespaceClientConfig
+}
+
+func (c *namespacedRCG) ToRawKubeConfigLoader() clientcmd.ClientConfig {
 	return c.namespaceConfig
 }
 
