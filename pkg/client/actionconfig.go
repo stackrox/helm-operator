@@ -39,15 +39,7 @@ type ActionConfigGetter interface {
 	ActionConfigFor(obj client.Object) (*action.Configuration, error)
 }
 
-type errActionConfigGetter struct {
-	err error
-}
-
-func (e errActionConfigGetter) ActionConfigFor(_ client.Object) (*action.Configuration, error) {
-	return nil, e.err
-}
-
-func NewActionConfigGetter(cfg *rest.Config, rm meta.RESTMapper, log logr.Logger) ActionConfigGetter {
+func NewActionConfigGetter(cfg *rest.Config, rm meta.RESTMapper, log logr.Logger) (ActionConfigGetter, error) {
 	rcg := newRESTClientGetter(cfg, rm, "")
 	// Setup the debug log function that Helm will use
 	debugLog := func(format string, v ...interface{}) {
@@ -61,7 +53,7 @@ func NewActionConfigGetter(cfg *rest.Config, rm meta.RESTMapper, log logr.Logger
 
 	kcs, err := kc.Factory.KubernetesClientSet()
 	if err != nil {
-		return errActionConfigGetter{err: err}
+		return nil, fmt.Errorf("creating kubernetes client set: %w", err)
 	}
 
 	return &actionConfigGetter{
@@ -69,7 +61,7 @@ func NewActionConfigGetter(cfg *rest.Config, rm meta.RESTMapper, log logr.Logger
 		kubeClientSet:    kcs,
 		debugLog:         debugLog,
 		restClientGetter: rcg.restClientGetter,
-	}
+	}, nil
 }
 
 var _ ActionConfigGetter = &actionConfigGetter{}

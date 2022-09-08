@@ -983,8 +983,8 @@ var _ = Describe("Reconciler", func() {
 						var actionConf *action.Configuration
 						BeforeEach(func() {
 							By("getting the current release and config", func() {
-								var err error
-								acg := helmclient.NewActionConfigGetter(mgr.GetConfig(), mgr.GetRESTMapper(), logr.Discard())
+								acg, err := helmclient.NewActionConfigGetter(mgr.GetConfig(), mgr.GetRESTMapper(), logr.Discard())
+								Expect(err).ShouldNot(HaveOccurred())
 								actionConf, err = acg.ActionConfigFor(obj)
 								Expect(err).To(BeNil())
 							})
