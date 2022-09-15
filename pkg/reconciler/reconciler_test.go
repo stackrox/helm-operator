@@ -1335,8 +1335,7 @@ var _ = Describe("Reconciler", func() {
 							It("pauses reconciliation", func() {
 								By("adding the pause-reconcile annotation to the CR", func() {
 									Expect(mgr.GetClient().Get(ctx, objKey, obj)).To(Succeed())
-									obj.SetAnnotations(map[string]string{
-										"my.domain/pause-reconcile": "true"})
+									obj.SetAnnotations(map[string]string{"my.domain/pause-reconcile": "true"})
 									Expect(mgr.GetClient().Update(ctx, obj)).To(Succeed())
 								})
 
@@ -1344,7 +1343,7 @@ var _ = Describe("Reconciler", func() {
 									Expect(mgr.GetClient().Delete(ctx, obj)).To(Succeed())
 								})
 
-								By("successfully reconciling a request", func() {
+								By("successfully reconciling a request when paused", func() {
 									res, err := r.Reconcile(ctx, req)
 									Expect(res).To(Equal(reconcile.Result{}))
 									Expect(err).To(BeNil())

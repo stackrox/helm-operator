@@ -450,7 +450,7 @@ func WithUninstallAnnotations(as ...annotation.Uninstall) Option {
 	}
 }
 
-// WithPauseReconcileAnnotation is an Option that configures and enables
+// WithPauseReconcileAnnotation is an Option that sets
 // a PauseReconcile annotation. If the Custom Resource watched by this
 // reconciler has the given annotation, and its value is set to `true`,
 // then reconciliation for this CR will not be performed until this annotation
@@ -627,16 +627,27 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 	if r.pauseReconcileAnnotation != "" {
 		if v, ok := obj.GetAnnotations()[r.pauseReconcileAnnotation]; ok {
 			if v == "true" {
-				log.Info(fmt.Sprintf("Resource has '%s' annotation set to 'true', reconcile stopped", r.pauseReconcileAnnotation))
+				log.Info(fmt.Sprintf("Resource has '%s' annotation set to 'true', reconcile paused.", r.pauseReconcileAnnotation))
 				u.UpdateStatus(
-					updater.EnsureCondition(conditions.Paused(corev1.ConditionTrue, conditions.ReasonPauseReconcileAnnotationSet, "")))
+					updater.EnsureCondition(conditions.Paused(corev1.ConditionTrue, conditions.ReasonPauseReconcileAnnotationTrue, "")),
+					updater.EnsureConditionUnknown(conditions.TypeIrreconcilable),
+					updater.EnsureConditionUnknown(conditions.TypeDeployed),
+					updater.EnsureConditionUnknown(conditions.TypeInitialized),
+					updater.EnsureConditionUnknown(conditions.TypeReleaseFailed),
+					updater.EnsureDeployedRelease(nil),
+				)
 				return ctrl.Result{}, nil
 			}
 		}
 	}
 
 	u.UpdateStatus(
-		updater.EnsureCondition(conditions.Paused(corev1.ConditionFalse, "", "")))
+		// TODO(ROX-12637): change to updater.EnsureCondition(conditions.Paused(corev1.ConditionFalse, "", "")))
+		// once stackrox operator with pause support is released.
+		// At that time also add `Paused` to the list of conditions expected in stackrox operator e2e tests.
+		// Otherwise, the number of conditions in the `status.conditions` list will vary depending on the version
+		// of used operator, which is cumbersome due to https://github.com/kudobuilder/kuttl/issues/76
+		updater.EnsureConditionAbsent(conditions.TypePaused))
 
 	actionClient, err := r.actionClientGetter.ActionClientFor(obj)
 	if err != nil {

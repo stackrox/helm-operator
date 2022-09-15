@@ -31,10 +31,10 @@ const (
 	TypeIrreconcilable = "Irreconcilable"
 	TypePaused         = "Paused"
 
-	ReasonInstallSuccessful           = status.ConditionReason("InstallSuccessful")
-	ReasonUpgradeSuccessful           = status.ConditionReason("UpgradeSuccessful")
-	ReasonUninstallSuccessful         = status.ConditionReason("UninstallSuccessful")
-	ReasonPauseReconcileAnnotationSet = status.ConditionReason("PauseReconcileAnnotationSet")
+	ReasonInstallSuccessful            = status.ConditionReason("InstallSuccessful")
+	ReasonUpgradeSuccessful            = status.ConditionReason("UpgradeSuccessful")
+	ReasonUninstallSuccessful          = status.ConditionReason("UninstallSuccessful")
+	ReasonPauseReconcileAnnotationTrue = status.ConditionReason("PauseReconcileAnnotationTrue")
 
 	ReasonErrorGettingClient       = status.ConditionReason("ErrorGettingClient")
 	ReasonErrorGettingValues       = status.ConditionReason("ErrorGettingValues")
