@@ -83,17 +83,18 @@ type Reconciler struct {
 	extraWatches                     []watchDescription
 	maxConcurrentReconciles          int
 	reconcilePeriod                  time.Duration
-	markFailedAfter                  time.Duration
+	markFailedAfter         		 time.Duration
 	maxHistory                       int
 	skipPrimaryGVKSchemeRegistration bool
 
 	stripManifestFromStatus bool
 
-	annotSetupOnce       sync.Once
-	annotations          map[string]struct{}
-	installAnnotations   map[string]annotation.Install
-	upgradeAnnotations   map[string]annotation.Upgrade
-	uninstallAnnotations map[string]annotation.Uninstall
+	annotSetupOnce           sync.Once
+	annotations              map[string]struct{}
+	installAnnotations       map[string]annotation.Install
+	upgradeAnnotations       map[string]annotation.Upgrade
+	uninstallAnnotations     map[string]annotation.Uninstall
+	pauseReconcileAnnotation string
 }
 
 type watchDescription struct {
@@ -450,6 +451,18 @@ func WithUninstallAnnotations(as ...annotation.Uninstall) Option {
 	}
 }
 
+// WithPauseReconcileAnnotation is an Option that sets
+// a PauseReconcile annotation. If the Custom Resource watched by this
+// reconciler has the given annotation, and its value is set to `true`,
+// then reconciliation for this CR will not be performed until this annotation
+// is removed.
+func WithPauseReconcileAnnotation(annotationName string) Option {
+	return func(r *Reconciler) error {
+		r.pauseReconcileAnnotation = annotationName
+		return nil
+	}
+}
+
 // WithPreHook is an Option that configures the reconciler to run the given
 // PreHook just before performing any actions (e.g. install, upgrade, uninstall,
 // or reconciliation).
@@ -604,6 +617,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 		return ctrl.Result{}, err
 	}
 
+	// The finalizer must be present on the CR before we can do anything. Otherwise, if the reconciliation fails,
+	// there might be resources  created by the chart that will not be garbage-collected
+	// (cluster-scoped resources or resources in other namespaces, which are not bound by an owner reference).
+	// This is a safety measure to ensure that the chart is fully uninstalled before the CR is deleted.
+	if obj.GetDeletionTimestamp() == nil && !controllerutil.ContainsFinalizer(obj, uninstallFinalizer) {
+		log.V(1).Info("Adding uninstall finalizer")
+		obj.SetFinalizers(append(obj.GetFinalizers(), uninstallFinalizer))
+		if err := r.client.Update(ctx, obj); err != nil {
+			log.Error(err, "Failed to add uninstall finalizer")
+			return ctrl.Result{}, err
+		}
+	}
+
 	u := updater.New(r.client)
 	defer func() {
 		applyErr := u.Apply(ctx, obj)
@@ -611,6 +637,31 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 			err = applyErr
 		}
 	}()
+
+	if r.pauseReconcileAnnotation != "" {
+		if v, ok := obj.GetAnnotations()[r.pauseReconcileAnnotation]; ok {
+			if v == "true" {
+				log.Info(fmt.Sprintf("Resource has '%s' annotation set to 'true', reconcile paused.", r.pauseReconcileAnnotation))
+				u.UpdateStatus(
+					updater.EnsureCondition(conditions.Paused(corev1.ConditionTrue, conditions.ReasonPauseReconcileAnnotationTrue, "")),
+					updater.EnsureConditionUnknown(conditions.TypeIrreconcilable),
+					updater.EnsureConditionUnknown(conditions.TypeDeployed),
+					updater.EnsureConditionUnknown(conditions.TypeInitialized),
+					updater.EnsureConditionUnknown(conditions.TypeReleaseFailed),
+					updater.EnsureDeployedRelease(nil),
+				)
+				return ctrl.Result{}, nil
+			}
+		}
+	}
+
+	u.UpdateStatus(
+		// TODO(ROX-12637): change to updater.EnsureCondition(conditions.Paused(corev1.ConditionFalse, "", "")))
+		// once stackrox operator with pause support is released.
+		// At that time also add `Paused` to the list of conditions expected in stackrox operator e2e tests.
+		// Otherwise, the number of conditions in the `status.conditions` list will vary depending on the version
+		// of used operator, which is cumbersome due to https://github.com/kudobuilder/kuttl/issues/76
+		updater.EnsureConditionAbsent(conditions.TypePaused))
 
 	actionClient, err := r.actionClientGetter.ActionClientFor(obj)
 	if err != nil {
@@ -621,8 +672,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 			updater.EnsureConditionUnknown(conditions.TypeReleaseFailed),
 			updater.EnsureDeployedRelease(nil),
 		)
-		// NOTE: If obj has the uninstall finalizer, that means a release WAS deployed at some point
-		//   in the past, but we don't know if it still is because we don't have an actionClient to check.
+		// NOTE: If obj has the uninstall finalizer, that doesn't mean a release was deployed at some point in the past.
+		//   This just means the CR was accepted by the reconcile method. The presence of the finalizer is required
+		//   to deploy any resources.
 		//   So the question is, what do we do with the finalizer? We could:
 		//      - Leave it in place. This would make the CR impossible to delete without either resolving this error, or
 		//        manually uninstalling the release, deleting the finalizer, and deleting the CR.
@@ -1117,8 +1169,6 @@ func (r *Reconciler) ensureDeployedRelease(u *updater.Updater, rel *release.Rele
 		relCopy.Manifest = ""
 		rel = &relCopy
 	}
-
-	u.Update(updater.EnsureFinalizer(uninstallFinalizer))
 	u.UpdateStatus(
 		updater.EnsureCondition(conditions.Deployed(corev1.ConditionTrue, reason, message)),
 		updater.EnsureDeployedRelease(rel),
