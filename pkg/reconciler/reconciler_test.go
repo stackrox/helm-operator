@@ -1336,6 +1336,7 @@ var _ = Describe("Reconciler", func() {
 								By("adding the pause-reconcile annotation to the CR", func() {
 									Expect(mgr.GetClient().Get(ctx, objKey, obj)).To(Succeed())
 									obj.SetAnnotations(map[string]string{"my.domain/pause-reconcile": "true"})
+									obj.Object["spec"] = map[string]interface{}{"replicaCount": "666"}
 									Expect(mgr.GetClient().Update(ctx, obj)).To(Succeed())
 								})
 
@@ -1357,6 +1358,13 @@ var _ = Describe("Reconciler", func() {
 									objStat := &objStatus{}
 									Expect(runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, objStat)).To(Succeed())
 									Expect(objStat.Status.Conditions.IsTrueFor(conditions.TypePaused)).To(BeTrue())
+								})
+
+								By("verifying the release has not changed", func() {
+									rel, err := ac.Get(obj.GetName())
+									Expect(err).To(BeNil())
+									Expect(rel).NotTo(BeNil())
+									Expect(*rel).To(Equal(*currentRelease))
 								})
 
 								By("removing the pause-reconcile annotation from the CR", func() {
