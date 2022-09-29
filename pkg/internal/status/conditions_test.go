@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kubeclock "k8s.io/apimachinery/pkg/util/clock"
+	kubeclocktesting "k8s.io/utils/clock/testing"
 )
 
 var (
@@ -41,14 +41,14 @@ func init() {
 
 func initConditions(init ...Condition) Conditions {
 	// Use the same initial time for all initial conditions
-	clock = kubeclock.NewFakeClock(initTime)
+	clock = kubeclocktesting.NewFakeClock(initTime)
 	conditions := Conditions{}
 	for _, c := range init {
 		conditions.SetCondition(c)
 	}
 
 	// Use an incrementing clock for the rest of the test
-	clock = &kubeclock.IntervalClock{
+	clock = &kubeclocktesting.IntervalClock{
 		Time:     initTime,
 		Duration: clockInterval,
 	}
