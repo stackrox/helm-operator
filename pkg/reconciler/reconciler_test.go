@@ -710,9 +710,10 @@ var _ = Describe("Reconciler", func() {
 							})
 
 							By("successfully reconciling a request", func() {
-								res, err := r.Reconcile(ctx, req)
-								Expect(res).To(Equal(reconcile.Result{}))
-								Expect(err).To(BeNil())
+								Eventually(func() error {
+									_, err := r.Reconcile(ctx, req)
+									return err
+								}).Should(Succeed())
 							})
 
 							By("ensuring the finalizer is removed and the CR is deleted", func() {
@@ -1316,9 +1317,10 @@ var _ = Describe("Reconciler", func() {
 								})
 
 								By("successfully reconciling a request", func() {
-									res, err := r.Reconcile(ctx, req)
-									Expect(res).To(Equal(reconcile.Result{}))
-									Expect(err).To(BeNil())
+									Eventually(func() error {
+										_, err := r.Reconcile(ctx, req)
+										return err
+									}).Should(Succeed())
 								})
 
 								By("verifying the release is uninstalled", func() {
@@ -1374,9 +1376,10 @@ var _ = Describe("Reconciler", func() {
 								})
 
 								By("successfully reconciling a request", func() {
-									res, err := r.Reconcile(ctx, req)
-									Expect(res).To(Equal(reconcile.Result{}))
-									Expect(err).To(BeNil())
+									Eventually(func() error {
+										_, err := r.Reconcile(ctx, req)
+										return err
+									}).Should(Succeed())
 								})
 
 								By("verifying the release is uninstalled", func() {

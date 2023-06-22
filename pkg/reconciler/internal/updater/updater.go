@@ -23,7 +23,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/operator-framework/helm-operator-plugins/internal/sdk/controllerutil"
@@ -70,38 +69,28 @@ func (u *Updater) UpdateStatusCustom(f extensions.UpdateStatusFunc) {
 }
 
 func (u *Updater) Apply(ctx context.Context, obj *unstructured.Unstructured) error {
-	backoff := retry.DefaultRetry
-
 	// Always update the status first. During uninstall, if
 	// we remove the finalizer, updating the status will fail
 	// because the object and its status will be garbage-collected
-	if err := retry.RetryOnConflict(backoff, func() error {
-		st := statusFor(obj)
-		needsStatusUpdate := false
-		for _, f := range u.updateStatusFuncs {
-			needsStatusUpdate = f(st) || needsStatusUpdate
+	st := statusFor(obj)
+	needsStatusUpdate := false
+	for _, f := range u.updateStatusFuncs {
+		needsStatusUpdate = f(st) || needsStatusUpdate
+	}
+	if needsStatusUpdate {
+		st.updateStatusObject()
+		obj.Object["status"] = st.StatusObject
+		if err := u.client.Status().Update(ctx, obj); err != nil {
+			return err
 		}
-		if needsStatusUpdate {
-			st.updateStatusObject()
-			obj.Object["status"] = st.StatusObject
-			return u.client.Status().Update(ctx, obj)
-		}
-		return nil
-	}); err != nil {
-		return err
 	}
 
-	if err := retry.RetryOnConflict(backoff, func() error {
-		needsUpdate := false
-		for _, f := range u.updateFuncs {
-			needsUpdate = f(obj) || needsUpdate
-		}
-		if needsUpdate {
-			return u.client.Update(ctx, obj)
-		}
-		return nil
-	}); err != nil {
-		return err
+	needsUpdate := false
+	for _, f := range u.updateFuncs {
+		needsUpdate = f(obj) || needsUpdate
+	}
+	if needsUpdate {
+		return u.client.Update(ctx, obj)
 	}
 
 	return nil
