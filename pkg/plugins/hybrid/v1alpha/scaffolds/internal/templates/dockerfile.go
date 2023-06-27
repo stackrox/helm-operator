@@ -41,7 +41,7 @@ func (f *Dockerfile) SetTemplateDefaults() error {
 // `api/` and `controller/` they would have to be added.
 
 const dockerfileTemplate = `# Build the manager binary
-FROM golang:1.18 as builder
+FROM golang:1.19 as builder
 
 WORKDIR /workspace
 # Copy the Go Modules manifests
@@ -59,7 +59,7 @@ COPY controllers/ controllers/
 # Build
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o manager main.go
 
-FROM registry.access.redhat.com/ubi8/ubi-minimal:8.4
+FROM registry.access.redhat.com/ubi8/ubi-micro:8.7
 
 ENV HOME=/opt/helm \
     USER_NAME=helm \
