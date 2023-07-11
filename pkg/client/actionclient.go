@@ -158,8 +158,8 @@ func (hcg *actionClientGetter) ActionClientFor(obj client.Object) (ActionInterfa
 	var chainedPostRenderer = chainedPostRenderer{
 		DefaultPostRendererFunc(rm, actionConfig.KubeClient, obj),
 	}
-	for _, provider := range hcg.postRendererGetters {
-		chainedPostRenderer = append(chainedPostRenderer, provider(rm, actionConfig.KubeClient, obj))
+	for _, postRendererGetter := range hcg.postRendererGetters {
+		chainedPostRenderer = append(chainedPostRenderer, postRendererGetter(rm, actionConfig.KubeClient, obj))
 	}
 
 	return &actionClient{
