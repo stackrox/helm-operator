@@ -113,9 +113,9 @@ func AppendUpgradeFailureRollbackOptions(opts ...RollbackOption) ActionClientGet
 
 type PostRendererGetter func(rm meta.RESTMapper, kubeClient kube.Interface, obj client.Object) postrender.PostRenderer
 
-func AppendPostRenderers(postRendererFns ...PostRendererGetter) ActionClientGetterOption {
+func AppendPostRenderers(postRendererGetters ...PostRendererGetter) ActionClientGetterOption {
 	return func(getter *actionClientGetter) error {
-		getter.postRendererProviders = append(getter.postRendererProviders, postRendererFns...)
+		getter.postRendererGetters = append(getter.postRendererGetters, postRendererGetters...)
 		return nil
 	}
 }
@@ -141,7 +141,7 @@ type actionClientGetter struct {
 	installFailureUninstallOpts []UninstallOption
 	upgradeFailureRollbackOpts  []RollbackOption
 
-	postRendererProviders []PostRendererGetter
+	postRendererGetters []PostRendererGetter
 }
 
 var _ ActionClientGetter = &actionClientGetter{}
@@ -158,7 +158,7 @@ func (hcg *actionClientGetter) ActionClientFor(obj client.Object) (ActionInterfa
 	var chainedPostRenderer = chainedPostRenderer{
 		DefaultPostRendererFunc(rm, actionConfig.KubeClient, obj),
 	}
-	for _, provider := range hcg.postRendererProviders {
+	for _, provider := range hcg.postRendererGetters {
 		chainedPostRenderer = append(chainedPostRenderer, provider(rm, actionConfig.KubeClient, obj))
 	}
 
