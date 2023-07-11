@@ -111,9 +111,9 @@ func AppendUpgradeFailureRollbackOptions(opts ...RollbackOption) ActionClientGet
 	}
 }
 
-type PostRendererProvider func(rm meta.RESTMapper, kubeClient kube.Interface, obj client.Object) postrender.PostRenderer
+type PostRendererGetter func(rm meta.RESTMapper, kubeClient kube.Interface, obj client.Object) postrender.PostRenderer
 
-func AppendPostRenderers(postRendererFns ...PostRendererProvider) ActionClientGetterOption {
+func AppendPostRenderers(postRendererFns ...PostRendererGetter) ActionClientGetterOption {
 	return func(getter *actionClientGetter) error {
 		getter.postRendererProviders = append(getter.postRendererProviders, postRendererFns...)
 		return nil
@@ -141,7 +141,7 @@ type actionClientGetter struct {
 	installFailureUninstallOpts []UninstallOption
 	upgradeFailureRollbackOpts  []RollbackOption
 
-	postRendererProviders []PostRendererProvider
+	postRendererProviders []PostRendererGetter
 }
 
 var _ ActionClientGetter = &actionClientGetter{}
