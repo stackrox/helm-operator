@@ -623,8 +623,8 @@ var _ = Describe("Reconciler", func() {
 								Expect(c.Message).To(Equal(acgErr.Error()))
 							})
 
-							By("verifying the uninstall finalizer is not present on the CR", func() {
-								Expect(controllerutil.ContainsFinalizer(obj, uninstallFinalizer)).To(BeFalse())
+							By("verifying the uninstall finalizer is present on the CR", func() {
+								Expect(controllerutil.ContainsFinalizer(obj, uninstallFinalizer)).To(BeTrue())
 							})
 						})
 						It("returns an error getting the release", func() {
@@ -660,8 +660,8 @@ var _ = Describe("Reconciler", func() {
 								Expect(c.Message).To(Equal("get not implemented"))
 							})
 
-							By("verifying the uninstall finalizer is not present on the CR", func() {
-								Expect(controllerutil.ContainsFinalizer(obj, uninstallFinalizer)).To(BeFalse())
+							By("verifying the uninstall finalizer is present on the CR", func() {
+								Expect(controllerutil.ContainsFinalizer(obj, uninstallFinalizer)).To(BeTrue())
 							})
 						})
 					})
@@ -696,8 +696,8 @@ var _ = Describe("Reconciler", func() {
 								Expect(c.Message).To(ContainSubstring("error parsing index"))
 							})
 
-							By("verifying the uninstall finalizer is not present on the CR", func() {
-								Expect(controllerutil.ContainsFinalizer(obj, uninstallFinalizer)).To(BeFalse())
+							By("verifying the uninstall finalizer is present on the CR", func() {
+								Expect(controllerutil.ContainsFinalizer(obj, uninstallFinalizer)).To(BeTrue())
 							})
 						})
 					})
@@ -763,8 +763,8 @@ var _ = Describe("Reconciler", func() {
 									Expect(c.Message).To(ContainSubstring("install failed: foobar"))
 								})
 
-								By("ensuring the uninstall finalizer is not present on the CR", func() {
-									Expect(controllerutil.ContainsFinalizer(obj, uninstallFinalizer)).To(BeFalse())
+								By("verifying the uninstall finalizer is present on the CR", func() {
+									Expect(controllerutil.ContainsFinalizer(obj, uninstallFinalizer)).To(BeTrue())
 								})
 							})
 						})
@@ -944,7 +944,7 @@ var _ = Describe("Reconciler", func() {
 								Expect(objStat.Status.DeployedRelease.Manifest).To(Equal(currentRelease.Manifest))
 							})
 
-							By("verifying the uninstall finalizer is not present on the CR", func() {
+							By("verifying the uninstall finalizer is present on the CR", func() {
 								Expect(controllerutil.ContainsFinalizer(obj, uninstallFinalizer)).To(BeTrue())
 							})
 						})
@@ -983,7 +983,7 @@ var _ = Describe("Reconciler", func() {
 								Expect(objStat.Status.DeployedRelease.Manifest).To(Equal(currentRelease.Manifest))
 							})
 
-							By("verifying the uninstall finalizer is not present on the CR", func() {
+							By("verifying the uninstall finalizer is present on the CR", func() {
 								Expect(controllerutil.ContainsFinalizer(obj, uninstallFinalizer)).To(BeTrue())
 							})
 						})
