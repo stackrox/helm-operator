@@ -617,8 +617,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 		return ctrl.Result{}, err
 	}
 
+	shouldUpdate := true
 	u := updater.New(r.client)
 	defer func() {
+		if !shouldUpdate {
+			return
+		}
 		applyErr := u.Apply(ctx, obj)
 		if err == nil && !apierrors.IsNotFound(applyErr) {
 			err = applyErr
@@ -698,8 +702,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 	}
 
 	if obj.GetDeletionTimestamp() != nil {
-		err := r.handleDeletion(ctx, actionClient, obj, log)
-		return ctrl.Result{}, err
+		if err := r.handleDeletion(ctx, actionClient, obj, log); err != nil {
+			return ctrl.Result{}, err
+		}
+		shouldUpdate = false
+		return ctrl.Result{}, nil
 	}
 
 	vals, err := r.getValues(ctx, obj)
@@ -806,28 +813,27 @@ const (
 )
 
 func (r *Reconciler) handleDeletion(ctx context.Context, actionClient helmclient.ActionInterface, obj *unstructured.Unstructured, log logr.Logger) error {
-	if !controllerutil.ContainsFinalizer(obj, uninstallFinalizer) {
-		log.Info("Resource is terminated, skipping reconciliation")
-		return nil
-	}
-
-	// Use defer in a closure so that it executes before we wait for
-	// the deletion of the CR. This might seem unnecessary since we're
-	// applying changes to the CR after is has a deletion timestamp.
-	// However, if uninstall fails, the finalizer will not be removed
-	// and we need to be able to update the conditions on the CR to
-	// indicate that the uninstall failed.
-	if err := func() (err error) {
-		uninstallUpdater := updater.New(r.client)
-		defer func() {
-			applyErr := uninstallUpdater.Apply(ctx, obj)
-			if err == nil {
-				err = applyErr
-			}
-		}()
-		return r.doUninstall(ctx, actionClient, &uninstallUpdater, obj, log)
-	}(); err != nil {
-		return err
+	if controllerutil.ContainsFinalizer(obj, uninstallFinalizer) {
+		// Use defer in a closure so that it executes before we wait for
+		// the deletion of the CR. This might seem unnecessary since we're
+		// applying changes to the CR after is has a deletion timestamp.
+		// However, if uninstall fails, the finalizer will not be removed
+		// and we need to be able to update the conditions on the CR to
+		// indicate that the uninstall failed.
+		if err := func() (err error) {
+			uninstallUpdater := updater.New(r.client)
+			defer func() {
+				applyErr := uninstallUpdater.Apply(ctx, obj)
+				if err == nil {
+					err = applyErr
+				}
+			}()
+			return r.doUninstall(ctx, actionClient, &uninstallUpdater, obj, log)
+		}(); err != nil {
+			return err
+		}
+	} else {
+		log.Info("Resource is already terminated, skipping deletion")
 	}
 
 	// Since the client is hitting a cache, waiting for the
