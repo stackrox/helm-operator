@@ -42,6 +42,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -643,6 +644,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 
 	shouldUpdate := true
 	u := updater.New(r.client)
+
+	if r.skipCRUpdates {
+		// FIXME: Find a less brutal read-only mode
+		u = updater.New(fake.NewClientBuilder().Build())
+	}
+
 	defer func() {
 		if !shouldUpdate {
 			return
