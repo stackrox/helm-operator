@@ -20,10 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	errs "github.com/pkg/errors"
 	"strings"
 	"sync"
 	"time"
+
+	errs "github.com/pkg/errors"
 
 	"github.com/go-logr/logr"
 	sdkhandler "github.com/operator-framework/operator-lib/handler"
@@ -87,6 +88,7 @@ type Reconciler struct {
 	markFailedAfter                  time.Duration
 	maxHistory                       int
 	skipPrimaryGVKSchemeRegistration bool
+	skipCRUpdates                    bool
 
 	stripManifestFromStatus bool
 
@@ -176,6 +178,14 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 // Option is a function that configures the helm Reconciler.
 type Option func(r *Reconciler) error
+
+// WithSkipCRUpdates skips changes to a watched CR, acting only on create and delete
+func WithSkipCRUpdates() Option {
+	return func(r *Reconciler) error {
+		r.skipCRUpdates = true
+		return nil
+	}
+}
 
 // WithClient is an Option that configures a Reconciler's client.
 //
@@ -755,9 +765,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 		}
 
 	case stateNeedsUpgrade:
-		rel, err = r.doUpgrade(actionClient, &u, obj, vals.AsMap(), log)
-		if err != nil {
-			return ctrl.Result{}, err
+		if !r.skipCRUpdates { // FIXME(ROX-PoC): Do this less clunky
+			rel, err = r.doUpgrade(actionClient, &u, obj, vals.AsMap(), log)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 
 	case stateUnchanged:
