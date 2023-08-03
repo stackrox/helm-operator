@@ -616,6 +616,7 @@ func WithSelector(s metav1.LabelSelector) Option {
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.Result, err error) {
 	log := r.log.WithValues(strings.ToLower(r.gvk.Kind), req.NamespacedName)
 	log.V(1).Info("Reconciliation triggered")
+	fmt.Printf("skipCRUpdates is set to: %v", r.skipCRUpdates)
 
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(*r.gvk)
@@ -771,11 +772,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 				return ctrl.Result{}, err
 			}
 		} else {
-			log.Info("Skipped upgrade because of skipCRUpdates") // FIXME: remove debug
+			fmt.Println("Skipped upgrade because of skipCRUpdates") // FIXME: remove debug
 		}
 
 	case stateUnchanged:
-		log.Info("State is unchanged!") // FIXME: Remove debug
+		fmt.Println("State is unchanged!") // FIXME: Remove debug
 		if err := r.doReconcile(actionClient, &u, rel, log); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -930,7 +931,7 @@ func (r *Reconciler) doInstall(actionClient helmclient.ActionInterface, u *updat
 	}
 	r.reportOverrideEvents(obj)
 
-	log.Info("Release installed", "name", rel.Name, "version", rel.Version)
+	fmt.Println("Release installed", "name", rel.Name, "version", rel.Version)
 
 	// If log verbosity is higher, output Helm Release Manifest that was installed
 	if log.V(4).Enabled() {
