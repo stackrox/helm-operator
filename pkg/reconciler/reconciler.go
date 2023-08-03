@@ -905,6 +905,9 @@ func (r *Reconciler) getReleaseState(client helmclient.ActionInterface, obj meta
 	if specRelease.Manifest != currentRelease.Manifest ||
 		currentRelease.Info.Status == release.StatusFailed ||
 		currentRelease.Info.Status == release.StatusSuperseded {
+		if r.skipCRUpdates {
+			return currentRelease, stateUnchanged, nil // FIXME: Do this nicer!
+		}
 		return currentRelease, stateNeedsUpgrade, nil
 	}
 	return currentRelease, stateUnchanged, nil
