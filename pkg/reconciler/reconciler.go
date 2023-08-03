@@ -648,6 +648,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 	if r.skipCRUpdates {
 		// FIXME: Find a less brutal read-only mode
 		u = updater.New(fake.NewClientBuilder().Build())
+		fmt.Println("WARNING! SKIPPING ALL CRD UPDATES IN R/O MODE")
 	}
 
 	defer func() {
@@ -783,7 +784,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 		}
 
 	case stateUnchanged:
-		fmt.Println("State is unchanged!") // FIXME: Remove debug
+		if r.skipCRUpdates {
+			fmt.Println("State is unchanged!") // FIXME: Remove debug
+			return ctrl.Result{RequeueAfter: r.reconcilePeriod}, nil
+		}
 		if err := r.doReconcile(actionClient, &u, rel, log); err != nil {
 			return ctrl.Result{}, err
 		}
