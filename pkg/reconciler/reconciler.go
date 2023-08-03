@@ -770,9 +770,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 			if err != nil {
 				return ctrl.Result{}, err
 			}
+		} else {
+			log.Info("Skipped upgrade because of skipCRUpdates") // FIXME: remove debug
 		}
 
 	case stateUnchanged:
+		log.Info("State is unchanged!") // FIXME: Remove debug
 		if err := r.doReconcile(actionClient, &u, rel, log); err != nil {
 			return ctrl.Result{}, err
 		}
