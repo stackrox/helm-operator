@@ -1228,7 +1228,6 @@ func (r *Reconciler) ensureDeployedRelease(u *updater.Updater, rel *release.Rele
 		rel = &relCopy
 	}
 
-	u.Update(updater.EnsureFinalizer(uninstallFinalizer))
 	u.UpdateStatus(
 		updater.EnsureCondition(conditions.Deployed(corev1.ConditionTrue, reason, message)),
 		updater.EnsureDeployedRelease(rel),
