@@ -517,6 +517,8 @@ var _ = Describe("Reconciler", func() {
 			cancel()
 		})
 
+		selector := metav1.LabelSelector{MatchLabels: map[string]string{"foo": "bar"}}
+
 		// After migration to Ginkgo v2 this can be rewritten using e.g. DescribeTable.
 		parameterizedReconcilerTests := func(opts reconcilerTestSuiteOpts) {
 			BeforeEach(func() {
@@ -535,6 +537,7 @@ var _ = Describe("Reconciler", func() {
 						WithUpgradeAnnotations(annotation.UpgradeDescription{}),
 						WithUninstallAnnotations(annotation.UninstallDescription{}),
 						WithPauseReconcileAnnotation("my.domain/pause-reconcile"),
+						WithSelector(selector),
 						WithOverrideValues(map[string]string{
 							"image.repository": "custom-nginx",
 						}),
@@ -550,6 +553,7 @@ var _ = Describe("Reconciler", func() {
 						WithUpgradeAnnotations(annotation.UpgradeDescription{}),
 						WithUninstallAnnotations(annotation.UninstallDescription{}),
 						WithPauseReconcileAnnotation("my.domain/pause-reconcile"),
+						WithSelector(selector),
 						WithOverrideValues(map[string]string{
 							"image.repository": "custom-nginx",
 						}),
@@ -1392,6 +1396,21 @@ var _ = Describe("Reconciler", func() {
 								})
 							})
 						})
+						When("label selector is present", func() {
+							It("reconciles only with label", func() {
+								By("adding label to the CR", func() {
+									Expect(mgr.GetClient().Get(ctx, objKey, obj)).To(Succeed())
+									obj.SetLabels(map[string]string{"foo": "bar"})
+									Expect(mgr.GetClient().Update(ctx, obj)).To(Succeed())
+								})
+
+								By("successfully reconciling a request", func() {
+									res, err := r.Reconcile(ctx, req)
+									Expect(res).To(Equal(reconcile.Result{}))
+									Expect(err).To(BeNil())
+								})
+							})
+						})
 					})
 				})
 			})
@@ -1442,6 +1461,67 @@ var _ = Describe("Reconciler", func() {
 		It("Setting up reconciler with manager causes custom builder setup to be executed", func() {
 			Expect(r.SetupWithManager(mgr)).To(Succeed())
 			Expect(controllerSetupCalled).To(BeTrue())
+		})
+	})
+
+	var _ = Describe("Test label selector for two reconcilers", func() {
+		var (
+			mgr              manager.Manager
+			firstReconciler  *Reconciler
+			secondReconciler *Reconciler
+			err              error
+		)
+		ctx := context.Background()
+		obj := testutil.BuildTestCR(gvk)
+		objKey := types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}
+		req := reconcile.Request{NamespacedName: objKey}
+
+		It("Building two reconcilers", func() {
+			By("preparing first reconciler", func() {
+				mgr = getManagerOrFail()
+				firstReconciler, err = New(
+					WithGroupVersionKind(gvk),
+					WithChart(chrt),
+					WithInstallAnnotations(annotation.InstallDescription{}),
+					WithUpgradeAnnotations(annotation.UpgradeDescription{}),
+					WithUninstallAnnotations(annotation.UninstallDescription{}),
+					WithOverrideValues(map[string]string{
+						"image.repository": "custom-nginx",
+					}),
+					WithSelector(metav1.LabelSelector{MatchLabels: map[string]string{"foo": "bar"}}),
+				)
+				Expect(err).To(BeNil())
+				Expect(firstReconciler.SetupWithManager(mgr)).To(Succeed())
+			})
+
+			By("preparing first reconciler", func() {
+				secondReconciler, err = New(
+					WithGroupVersionKind(gvk),
+					WithChart(chrt),
+					WithInstallAnnotations(annotation.InstallDescription{}),
+					WithUpgradeAnnotations(annotation.UpgradeDescription{}),
+					WithUninstallAnnotations(annotation.UninstallDescription{}),
+					WithOverrideValues(map[string]string{
+						"image.repository": "custom-nginx",
+					}),
+					WithSelector(metav1.LabelSelector{MatchLabels: map[string]string{"foo": "baz"}}),
+				)
+				Expect(err).To(BeNil())
+				Expect(secondReconciler.SetupWithManager(mgr)).To(Succeed())
+			})
+		})
+
+		It("Successfully reconcile", func() {
+			obj.SetLabels(map[string]string{"foo": "bar"})
+			Expect(mgr.GetClient().Create(ctx, obj)).To(Succeed())
+
+			res, err := firstReconciler.Reconcile(ctx, req)
+			Expect(res).To(Equal(reconcile.Result{}))
+			Expect(err).To(BeNil())
+
+			res, err = secondReconciler.Reconcile(ctx, req)
+			Expect(res).To(Equal(reconcile.Result{}))
+			Expect(err).To(BeNil())
 		})
 	})
 })

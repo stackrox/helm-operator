@@ -1161,6 +1161,7 @@ func (r *Reconciler) setupWatches(mgr ctrl.Manager, c controller.Controller) err
 	if err := c.Watch(
 		source.Kind(mgr.GetCache(), secret),
 		handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), obj, handler.OnlyControllerOwner()),
+		preds...,
 	); err != nil {
 		return err
 	}
