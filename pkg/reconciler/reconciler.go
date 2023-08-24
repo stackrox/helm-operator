@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	errs "github.com/pkg/errors"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"strings"
 	"sync"
 	"time"
@@ -650,6 +651,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 		return ctrl.Result{}, err
 	}
 
+	if r.selectorPredicate != nil && !r.selectorPredicate.Generic(event.GenericEvent{Object: obj}) {
+		log.V(1).Info("Label selector does not match, skipping reconcile")
+		return ctrl.Result{}, nil
+	}
+
 	// The finalizer must be present on the CR before we can do anything. Otherwise, if the reconciliation fails,
 	// there might be resources created by the chart that will not be garbage-collected
 	// (cluster-scoped resources or resources in other namespaces, which are not bound by an owner reference).
@@ -1161,7 +1167,6 @@ func (r *Reconciler) setupWatches(mgr ctrl.Manager, c controller.Controller) err
 	if err := c.Watch(
 		source.Kind(mgr.GetCache(), secret),
 		handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), obj, handler.OnlyControllerOwner()),
-		preds...,
 	); err != nil {
 		return err
 	}
