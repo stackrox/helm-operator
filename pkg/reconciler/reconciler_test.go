@@ -1399,7 +1399,7 @@ var _ = Describe("Reconciler", func() {
 						})
 						When("label selector succeeds", func() {
 							It("reconciles only matching label", func() {
-								By("setting a broken action client getter for the reconciler", func() {
+								By("setting an invalid action client getter to assert different reconcile results", func() {
 									r.actionClientGetter = helmclient.ActionClientGetterFunc(func(client.Object) (helmclient.ActionInterface, error) {
 										fakeClient := helmfake.NewActionClient()
 										return &fakeClient, nil
