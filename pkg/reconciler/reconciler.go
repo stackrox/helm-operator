@@ -41,6 +41,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/source"
@@ -271,7 +272,7 @@ func WithOverrideValues(overrides map[string]string) Option {
 	}
 }
 
-// WithDependentWatchesEnabled is an Option that configures whether the
+// SkipDependentWatches is an Option that configures whether the
 // Reconciler will register watches for dependent objects in releases and
 // trigger reconciliations when they change.
 //
@@ -602,7 +603,7 @@ func WithControllerSetupFunc(f ControllerSetupFunc) Option {
 }
 
 // ControllerSetup allows restricted access to the Controller using the WithControllerSetupFunc option.
-// Currently the only supposed configuration is adding additional watchers do the controller.
+// Currently, the only supposed configuration is adding additional watchers do the controller.
 type ControllerSetup interface {
 	// Watch takes events provided by a Source and uses the EventHandler to
 	// enqueue reconcile.Requests in response to the events.
@@ -653,6 +654,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 	}
 	if err != nil {
 		return ctrl.Result{}, err
+	}
+
+	if r.selectorPredicate != nil && !r.selectorPredicate.Generic(event.GenericEvent{Object: obj}) {
+		log.V(1).Info("Label selector does not match, skipping reconcile")
+		return ctrl.Result{}, nil
 	}
 
 	// The finalizer must be present on the CR before we can do anything. Otherwise, if the reconciliation fails,
