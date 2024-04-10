@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	errs "github.com/pkg/errors"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"strings"
 	"sync"
@@ -28,6 +27,7 @@ import (
 
 	"github.com/go-logr/logr"
 	sdkhandler "github.com/operator-framework/operator-lib/handler"
+	errs "github.com/pkg/errors"
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chartutil"
@@ -701,7 +701,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (res ctrl.
 		// of used operator, which is cumbersome due to https://github.com/kudobuilder/kuttl/issues/76
 		updater.EnsureConditionAbsent(conditions.TypePaused))
 
-	actionClient, err := r.actionClientGetter.ActionClientFor(obj)
+	actionClient, err := r.actionClientGetter.ActionClientFor(ctx, obj)
 	if err != nil {
 		u.UpdateStatus(
 			updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionTrue, conditions.ReasonErrorGettingClient, err)),
@@ -1114,7 +1114,7 @@ func (r *Reconciler) addDefaults(mgr ctrl.Manager, controllerName string) error 
 		r.log = ctrl.Log.WithName("controllers").WithName("Helm")
 	}
 	if r.actionClientGetter == nil {
-		actionConfigGetter, err := helmclient.NewActionConfigGetter(mgr.GetConfig(), mgr.GetRESTMapper(), r.log)
+		actionConfigGetter, err := helmclient.NewActionConfigGetter(mgr.GetConfig(), mgr.GetRESTMapper())
 		if err != nil {
 			return fmt.Errorf("creating action config getter: %w", err)
 		}
