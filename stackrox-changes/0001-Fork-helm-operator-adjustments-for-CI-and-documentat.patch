@@ -1,7 +1,7 @@
-From d1dcbdfa2a7499c1bfab389445cc3ca5e2976376 Mon Sep 17 00:00:00 2001
+From f53183409e97618c4ced501ee4d562b164cb4aa9 Mon Sep 17 00:00:00 2001
 From: =?UTF-8?q?Simon=20B=C3=A4umer?= <baeumer@pm.me>
 Date: Tue, 18 May 2021 19:21:56 +0200
-Subject: [PATCH 01/12] Fork helm-operator adjustments for CI and documentation
+Subject: [PATCH 01/11] Fork helm-operator adjustments for CI and documentation
  (#4)
 
 ---
@@ -22,7 +22,7 @@ index 4dc4ae9..6b2ba9e 100644
  - changed-files:
    - any-glob-to-any-file:
 diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
-index 3b538af..d52ba7e 100644
+index 073655e..2ecc44a 100644
 --- a/.github/workflows/ci.yml
 +++ b/.github/workflows/ci.yml
 @@ -1,11 +1,7 @@

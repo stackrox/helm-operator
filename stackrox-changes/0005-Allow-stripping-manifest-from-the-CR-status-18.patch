@@ -1,15 +1,15 @@
-From eac78a5f5bc4f11d0e4fab2de78983b50c74af00 Mon Sep 17 00:00:00 2001
+From e7b6b07c76e83a6adc70d817f18aaefef5264343 Mon Sep 17 00:00:00 2001
 From: Malte Isberner <2822367+misberner@users.noreply.github.com>
 Date: Thu, 1 Jul 2021 12:01:09 +0200
-Subject: [PATCH 05/12] Allow stripping manifest from the CR status (#18)
+Subject: [PATCH 05/11] Allow stripping manifest from the CR status (#18)
 
 ---
- pkg/reconciler/reconciler.go      | 27 ++++++++++++++++++++++++---
+ pkg/reconciler/reconciler.go      | 26 +++++++++++++++++++++++---
  pkg/reconciler/reconciler_test.go | 10 ++++++++++
- 2 files changed, 34 insertions(+), 3 deletions(-)
+ 2 files changed, 33 insertions(+), 3 deletions(-)
 
 diff --git a/pkg/reconciler/reconciler.go b/pkg/reconciler/reconciler.go
-index 72957fc..16568ff 100644
+index e961763..85dc37d 100644
 --- a/pkg/reconciler/reconciler.go
 +++ b/pkg/reconciler/reconciler.go
 @@ -89,6 +89,8 @@ type Reconciler struct {
@@ -39,7 +39,7 @@ index 72957fc..16568ff 100644
  // SkipPrimaryGVKSchemeRegistration is an Option that allows to disable the default behaviour of
  // registering unstructured.Unstructured as underlying type for the GVK scheme.
  //
-@@ -665,7 +678,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
+@@ -665,7 +678,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
  	if errors.Is(err, driver.ErrReleaseNotFound) {
  		u.UpdateStatus(updater.EnsureCondition(conditions.Deployed(corev1.ConditionFalse, "", "")))
  	} else if err == nil {
@@ -48,7 +48,7 @@ index 72957fc..16568ff 100644
  	}
  	u.UpdateStatus(updater.EnsureCondition(conditions.Initialized(corev1.ConditionTrue, "", "")))
  
-@@ -755,7 +768,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
+@@ -755,7 +768,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
  		}
  	}
  
@@ -66,7 +66,7 @@ index 72957fc..16568ff 100644
  	reason := conditions.ReasonInstallSuccessful
  	message := "release was successfully installed"
  	if rel.Version > 1 {
-@@ -1147,6 +1160,14 @@ func ensureDeployedRelease(u *updater.Updater, rel *release.Release) {
+@@ -1147,6 +1160,13 @@ func ensureDeployedRelease(u *updater.Updater, rel *release.Release) {
  	if rel.Info != nil && len(rel.Info.Notes) > 0 {
  		message = rel.Info.Notes
  	}
@@ -77,26 +77,25 @@ index 72957fc..16568ff 100644
 +		rel = &relCopy
 +	}
 +
-+	u.Update(updater.EnsureFinalizer(uninstallFinalizer))
  	u.UpdateStatus(
  		updater.EnsureCondition(conditions.Deployed(corev1.ConditionTrue, reason, message)),
  		updater.EnsureDeployedRelease(rel),
 diff --git a/pkg/reconciler/reconciler_test.go b/pkg/reconciler/reconciler_test.go
-index cb8331b..3ff7780 100644
+index 09dde64..71db28b 100644
 --- a/pkg/reconciler/reconciler_test.go
 +++ b/pkg/reconciler/reconciler_test.go
-@@ -198,6 +198,16 @@ var _ = Describe("Reconciler", func() {
+@@ -200,6 +200,16 @@ var _ = Describe("Reconciler", func() {
  				Expect(r.skipDependentWatches).To(BeTrue())
  			})
  		})
 +		_ = Describe("StripManifestFromStatus", func() {
 +			It("should set to false", func() {
 +				Expect(StripManifestFromStatus(false)(r)).To(Succeed())
-+				Expect(r.stripManifestFromStatus).To(Equal(false))
++				Expect(r.stripManifestFromStatus).To(BeFalse())
 +			})
 +			It("should set to true", func() {
 +				Expect(StripManifestFromStatus(true)(r)).To(Succeed())
-+				Expect(r.stripManifestFromStatus).To(Equal(true))
++				Expect(r.stripManifestFromStatus).To(BeTrue())
 +			})
 +		})
  		_ = Describe("WithMaxConcurrentReconciles", func() {

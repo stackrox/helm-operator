@@ -1,7 +1,7 @@
-From 0c607d24bf6732a5d8ce6dfac507c6dc7970f0e2 Mon Sep 17 00:00:00 2001
+From d83cfeae8f9a552f451808357ba90c75b470c660 Mon Sep 17 00:00:00 2001
 From: Malte Isberner <2822367+misberner@users.noreply.github.com>
 Date: Tue, 6 Jul 2021 02:52:54 +0200
-Subject: [PATCH 06/12] ROX-7242: Make the operator preserve custom statuses,
+Subject: [PATCH 06/11] ROX-7242: Make the operator preserve custom statuses,
  and allow updating custom status through extensions (#17)
 
 ---
@@ -205,10 +205,10 @@ index fa84e86..e42b1c5 100644
  
  	It("should handle arbitrary types", func() {
 diff --git a/pkg/reconciler/reconciler.go b/pkg/reconciler/reconciler.go
-index 16568ff..bbdd5b1 100644
+index 85dc37d..01a456b 100644
 --- a/pkg/reconciler/reconciler.go
 +++ b/pkg/reconciler/reconciler.go
-@@ -683,7 +683,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
+@@ -683,7 +683,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
  	u.UpdateStatus(updater.EnsureCondition(conditions.Initialized(corev1.ConditionTrue, "", "")))
  
  	for _, ext := range r.preExtensions {
@@ -217,7 +217,7 @@ index 16568ff..bbdd5b1 100644
  			u.UpdateStatus(
  				updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionTrue, conditions.ReasonReconcileError, err)),
  				updater.EnsureConditionUnknown(conditions.TypeReleaseFailed),
-@@ -759,7 +759,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
+@@ -759,7 +759,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
  	}
  
  	for _, ext := range r.postExtensions {

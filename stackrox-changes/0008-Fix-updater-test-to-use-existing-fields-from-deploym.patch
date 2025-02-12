@@ -1,7 +1,7 @@
-From 5d45d80facfc43612778cba65ac0cc92cab6c669 Mon Sep 17 00:00:00 2001
+From f5e8eac7c89d04f177b12b13ac6da7a239c9645c Mon Sep 17 00:00:00 2001
 From: Simon Baeumer <sbaumer@redhat.com>
 Date: Thu, 5 May 2022 09:23:24 +0200
-Subject: [PATCH 08/12] Fix updater test to use existing fields from
+Subject: [PATCH 08/11] Fix updater test to use existing fields from
  deployment's status field
 
 ---
@@ -105,7 +105,7 @@ index e42b1c5..a4f8c3a 100644
  			Expect(err).To(Succeed())
  		})
 diff --git a/pkg/reconciler/reconciler.go b/pkg/reconciler/reconciler.go
-index 7e1f12d..8b34f59 100644
+index 98d9521..98493a3 100644
 --- a/pkg/reconciler/reconciler.go
 +++ b/pkg/reconciler/reconciler.go
 @@ -50,6 +50,7 @@ import (

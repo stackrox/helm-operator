@@ -1,14 +1,14 @@
-From 991117d986687eb0d68cbfeb1951f3492bb1d50d Mon Sep 17 00:00:00 2001
+From 6c01a7807c474606e4d871e393b436b2e59e2fad Mon Sep 17 00:00:00 2001
 From: Marcin Owsiany <porridge@redhat.com>
 Date: Tue, 14 Dec 2021 06:55:05 +0100
-Subject: [PATCH 07/12] ROX- 8130: Add WithExtraWatch option. (#22)
+Subject: [PATCH 07/11] ROX- 8130: Add WithExtraWatch option. (#22)
 
 ---
- pkg/reconciler/reconciler.go | 23 +++++++++++++++++++++++
- 1 file changed, 23 insertions(+)
+ pkg/reconciler/reconciler.go | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
 
 diff --git a/pkg/reconciler/reconciler.go b/pkg/reconciler/reconciler.go
-index bbdd5b1..7e1f12d 100644
+index 01a456b..98d9521 100644
 --- a/pkg/reconciler/reconciler.go
 +++ b/pkg/reconciler/reconciler.go
 @@ -81,6 +81,7 @@ type Reconciler struct {
@@ -19,20 +19,7 @@ index bbdd5b1..7e1f12d 100644
  	maxConcurrentReconciles          int
  	reconcilePeriod                  time.Duration
  	waitForDeletionTimeout           time.Duration
-@@ -98,6 +99,12 @@ type Reconciler struct {
- 	uninstallAnnotations map[string]annotation.Uninstall
- }
- 
-+type watchDescription struct {
-+	src        source.Source
-+	predicates []predicate.Predicate
-+	handler    handler.EventHandler
-+}
-+
- // New creates a new Reconciler that reconciles custom resources that define a
- // Helm release. New takes variadic Option arguments that are used to configure
- // the Reconciler.
-@@ -555,6 +562,16 @@ func WithValueMapper(m values.Mapper) Option {
+@@ -555,6 +556,16 @@ func WithValueMapper(m values.Mapper) Option {
  	}
  }
  
@@ -49,7 +36,7 @@ index bbdd5b1..7e1f12d 100644
  // WithSelector is an Option that configures the reconciler to creates a
  // predicate that is used to filter resources based on the specified selector
  func WithSelector(s metav1.LabelSelector) Option {
-@@ -1144,6 +1161,12 @@ func (r *Reconciler) setupWatches(mgr ctrl.Manager, c controller.Controller) err
+@@ -1144,6 +1155,12 @@ func (r *Reconciler) setupWatches(mgr ctrl.Manager, c controller.Controller) err
  		return err
  	}
  

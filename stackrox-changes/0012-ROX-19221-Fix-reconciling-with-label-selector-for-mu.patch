@@ -1,7 +1,7 @@
-From 4f1b67d62ed973508a9539f9d4a85b17bcd04ca2 Mon Sep 17 00:00:00 2001
+From 1b2840226a8b2eb457d3b7f36565d2a4744d5e3a Mon Sep 17 00:00:00 2001
 From: Aleksandr Kurlov <sasha.kurlov@gmail.com>
 Date: Fri, 25 Aug 2023 17:20:00 +0200
-Subject: [PATCH 12/12] ROX-19221: Fix reconciling with label selector for
+Subject: [PATCH 11/11] ROX-19221: Fix reconciling with label selector for
  multiple reconcilers (#42)
 
 * Add filter predicate to secret kind watch
@@ -17,7 +17,7 @@ Subject: [PATCH 12/12] ROX-19221: Fix reconciling with label selector for
  2 files changed, 47 insertions(+), 2 deletions(-)
 
 diff --git a/pkg/reconciler/reconciler.go b/pkg/reconciler/reconciler.go
-index dfd78b1..f31a37e 100644
+index a9b03e8..8da5a9b 100644
 --- a/pkg/reconciler/reconciler.go
 +++ b/pkg/reconciler/reconciler.go
 @@ -41,6 +41,7 @@ import (
@@ -28,7 +28,7 @@ index dfd78b1..f31a37e 100644
  	"sigs.k8s.io/controller-runtime/pkg/handler"
  	"sigs.k8s.io/controller-runtime/pkg/predicate"
  	"sigs.k8s.io/controller-runtime/pkg/source"
-@@ -277,7 +278,7 @@ func WithOverrideValues(overrides map[string]string) Option {
+@@ -271,7 +272,7 @@ func WithOverrideValues(overrides map[string]string) Option {
  	}
  }
  
@@ -37,7 +37,7 @@ index dfd78b1..f31a37e 100644
  // Reconciler will register watches for dependent objects in releases and
  // trigger reconciliations when they change.
  //
-@@ -608,7 +609,7 @@ func WithControllerSetupFunc(f ControllerSetupFunc) Option {
+@@ -602,7 +603,7 @@ func WithControllerSetupFunc(f ControllerSetupFunc) Option {
  }
  
  // ControllerSetup allows restricted access to the Controller using the WithControllerSetupFunc option.
@@ -46,7 +46,7 @@ index dfd78b1..f31a37e 100644
  type ControllerSetup interface {
  	// Watch takes events provided by a Source and uses the EventHandler to
  	// enqueue reconcile.Requests in response to the events.
-@@ -661,6 +662,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
+@@ -655,6 +656,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
  		return ctrl.Result{}, err
  	}
  
@@ -59,10 +59,10 @@ index dfd78b1..f31a37e 100644
  	// there might be resources created by the chart that will not be garbage-collected
  	// (cluster-scoped resources or resources in other namespaces, which are not bound by an owner reference).
 diff --git a/pkg/reconciler/reconciler_test.go b/pkg/reconciler/reconciler_test.go
-index bc57087..a463952 100644
+index 4d9227c..7c5af66 100644
 --- a/pkg/reconciler/reconciler_test.go
 +++ b/pkg/reconciler/reconciler_test.go
-@@ -501,6 +501,7 @@ var _ = Describe("Reconciler", func() {
+@@ -503,6 +503,7 @@ var _ = Describe("Reconciler", func() {
  			Expect(mgr.GetCache().WaitForCacheSync(ctx)).To(BeTrue())
  
  			obj = testutil.BuildTestCR(gvk)
@@ -70,7 +70,7 @@ index bc57087..a463952 100644
  			objKey = types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}
  			req = reconcile.Request{NamespacedName: objKey}
  		})
-@@ -533,6 +534,8 @@ var _ = Describe("Reconciler", func() {
+@@ -535,6 +536,8 @@ var _ = Describe("Reconciler", func() {
  			cancel()
  		})
  
@@ -79,7 +79,7 @@ index bc57087..a463952 100644
  		// After migration to Ginkgo v2 this can be rewritten using e.g. DescribeTable.
  		parameterizedReconcilerTests := func(opts reconcilerTestSuiteOpts) {
  			BeforeEach(func() {
-@@ -551,6 +554,7 @@ var _ = Describe("Reconciler", func() {
+@@ -553,6 +556,7 @@ var _ = Describe("Reconciler", func() {
  						WithUpgradeAnnotations(annotation.UpgradeDescription{}),
  						WithUninstallAnnotations(annotation.UninstallDescription{}),
  						WithPauseReconcileAnnotation("my.domain/pause-reconcile"),
@@ -87,7 +87,7 @@ index bc57087..a463952 100644
  						WithOverrideValues(map[string]string{
  							"image.repository": "custom-nginx",
  						}),
-@@ -566,6 +570,7 @@ var _ = Describe("Reconciler", func() {
+@@ -568,6 +572,7 @@ var _ = Describe("Reconciler", func() {
  						WithUpgradeAnnotations(annotation.UpgradeDescription{}),
  						WithUninstallAnnotations(annotation.UninstallDescription{}),
  						WithPauseReconcileAnnotation("my.domain/pause-reconcile"),
@@ -95,7 +95,7 @@ index bc57087..a463952 100644
  						WithOverrideValues(map[string]string{
  							"image.repository": "custom-nginx",
  						}),
-@@ -1455,6 +1460,40 @@ var _ = Describe("Reconciler", func() {
+@@ -1502,6 +1507,40 @@ var _ = Describe("Reconciler", func() {
  								})
  							})
  						})
@@ -117,7 +117,7 @@ index bc57087..a463952 100644
 +								By("reconciling is skipped, action client was not called and no error returned", func() {
 +									res, err := r.Reconcile(ctx, req)
 +									Expect(res).To(Equal(reconcile.Result{}))
-+									Expect(err).To(BeNil())
++									Expect(err).ToNot(HaveOccurred())
 +								})
 +
 +								By("setting matching label to the CR", func() {

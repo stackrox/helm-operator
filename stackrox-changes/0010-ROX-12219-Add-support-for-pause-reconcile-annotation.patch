@@ -1,7 +1,7 @@
-From 10aa91d2149e4ff369a622daa56c80d9772f11e2 Mon Sep 17 00:00:00 2001
+From 30a1ac3212ce7b8733cce1e7e31ea18e138997ab Mon Sep 17 00:00:00 2001
 From: Vlad Bologa <vbologa@redhat.com>
 Date: Mon, 19 Sep 2022 11:31:09 +0200
-Subject: [PATCH 10/12] ROX-12219: Add support for pause-reconcile annotation
+Subject: [PATCH 10/11] ROX-12219: Add support for pause-reconcile annotation
  (#29)
 
 Co-authored-by: Marcin Owsiany <porridge@redhat.com>
@@ -61,7 +61,7 @@ index 19e84af..4c4bd31 100644
  	return func(status *helmAppStatus) bool {
  		newRel := helmAppReleaseFor(rel)
 diff --git a/pkg/reconciler/reconciler.go b/pkg/reconciler/reconciler.go
-index 338e492..4e055f7 100644
+index cc061ff..a9b03e8 100644
 --- a/pkg/reconciler/reconciler.go
 +++ b/pkg/reconciler/reconciler.go
 @@ -92,11 +92,12 @@ type Reconciler struct {
@@ -81,8 +81,8 @@ index 338e492..4e055f7 100644
 +	pauseReconcileAnnotation string
  }
  
- type watchDescription struct {
-@@ -476,6 +477,18 @@ func WithUninstallAnnotations(as ...annotation.Uninstall) Option {
+ // New creates a new Reconciler that reconciles custom resources that define a
+@@ -470,6 +471,18 @@ func WithUninstallAnnotations(as ...annotation.Uninstall) Option {
  	}
  }
  
@@ -101,7 +101,7 @@ index 338e492..4e055f7 100644
  // WithPreHook is an Option that configures the reconciler to run the given
  // PreHook just before performing any actions (e.g. install, upgrade, uninstall,
  // or reconciliation).
-@@ -668,6 +681,31 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
+@@ -662,6 +675,31 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
  		}
  	}()
  
@@ -134,10 +134,10 @@ index 338e492..4e055f7 100644
  	if err != nil {
  		u.UpdateStatus(
 diff --git a/pkg/reconciler/reconciler_test.go b/pkg/reconciler/reconciler_test.go
-index 3ff7780..bc57087 100644
+index 71db28b..4d9227c 100644
 --- a/pkg/reconciler/reconciler_test.go
 +++ b/pkg/reconciler/reconciler_test.go
-@@ -402,6 +402,13 @@ var _ = Describe("Reconciler", func() {
+@@ -404,6 +404,13 @@ var _ = Describe("Reconciler", func() {
  				}))
  			})
  		})
@@ -151,7 +151,7 @@ index 3ff7780..bc57087 100644
  		_ = Describe("WithPreHook", func() {
  			It("should set a reconciler prehook", func() {
  				called := false
-@@ -543,6 +550,7 @@ var _ = Describe("Reconciler", func() {
+@@ -545,6 +552,7 @@ var _ = Describe("Reconciler", func() {
  						WithInstallAnnotations(annotation.InstallDescription{}),
  						WithUpgradeAnnotations(annotation.UpgradeDescription{}),
  						WithUninstallAnnotations(annotation.UninstallDescription{}),
@@ -159,7 +159,7 @@ index 3ff7780..bc57087 100644
  						WithOverrideValues(map[string]string{
  							"image.repository": "custom-nginx",
  						}),
-@@ -557,6 +565,7 @@ var _ = Describe("Reconciler", func() {
+@@ -559,6 +567,7 @@ var _ = Describe("Reconciler", func() {
  						WithInstallAnnotations(annotation.InstallDescription{}),
  						WithUpgradeAnnotations(annotation.UpgradeDescription{}),
  						WithUninstallAnnotations(annotation.UninstallDescription{}),
@@ -167,7 +167,7 @@ index 3ff7780..bc57087 100644
  						WithOverrideValues(map[string]string{
  							"image.repository": "custom-nginx",
  						}),
-@@ -1382,6 +1391,64 @@ var _ = Describe("Reconciler", func() {
+@@ -1429,6 +1438,64 @@ var _ = Describe("Reconciler", func() {
  									verifyNoRelease(ctx, mgr.GetClient(), obj.GetNamespace(), obj.GetName(), currentRelease)
  								})
  
@@ -193,7 +193,7 @@ index 3ff7780..bc57087 100644
 +								By("successfully reconciling a request when paused", func() {
 +									res, err := r.Reconcile(ctx, req)
 +									Expect(res).To(Equal(reconcile.Result{}))
-+									Expect(err).To(BeNil())
++									Expect(err).ToNot(HaveOccurred())
 +								})
 +
 +								By("getting the CR", func() {
@@ -208,7 +208,7 @@ index 3ff7780..bc57087 100644
 +
 +								By("verifying the release has not changed", func() {
 +									rel, err := ac.Get(obj.GetName())
-+									Expect(err).To(BeNil())
++									Expect(err).ToNot(HaveOccurred())
 +									Expect(rel).NotTo(BeNil())
 +									Expect(*rel).To(Equal(*currentRelease))
 +								})
@@ -222,7 +222,7 @@ index 3ff7780..bc57087 100644
 +								By("successfully reconciling a request", func() {
 +									res, err := r.Reconcile(ctx, req)
 +									Expect(res).To(Equal(reconcile.Result{}))
-+									Expect(err).To(BeNil())
++									Expect(err).ToNot(HaveOccurred())
 +								})
 +
 +								By("verifying the release is uninstalled", func() {

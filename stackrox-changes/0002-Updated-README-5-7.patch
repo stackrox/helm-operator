@@ -1,7 +1,7 @@
-From 02067ba71cdf44ed1efa7e57677addd66732a9d3 Mon Sep 17 00:00:00 2001
+From a6cae443b507db955a349d3bd5297c46748d982a Mon Sep 17 00:00:00 2001
 From: Gaurav Nelson <gaurav@stackrox.com>
 Date: Thu, 20 May 2021 17:22:49 +1000
-Subject: [PATCH 02/12] Updated README (#5)(#7)
+Subject: [PATCH 02/11] Updated README (#5)(#7)
 
 ---
  README.md | 53 +++++++++++++++++++++++++++--------------------------

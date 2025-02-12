@@ -1,7 +1,7 @@
-From b4007abfac7f380ecc2750cb37ddf059a50fdda0 Mon Sep 17 00:00:00 2001
+From 25756d733b7b7d4acfa8c7e4b2226f02e3386e50 Mon Sep 17 00:00:00 2001
 From: Malte Isberner <2822367+misberner@users.noreply.github.com>
 Date: Tue, 15 Jun 2021 12:16:55 +0200
-Subject: [PATCH 03/12] Allow adding reconciliation extensions (#9)
+Subject: [PATCH 03/11] Allow adding reconciliation extensions (#9)
 
 ---
  pkg/extensions/types.go      | 12 +++++++
@@ -28,7 +28,7 @@ index 0000000..689f91d
 +// An error returned by a ReconcileExtension will cause the Reconcile to fail, unlike a hook error.
 +type ReconcileExtension func(context.Context, *unstructured.Unstructured, logr.Logger) error
 diff --git a/pkg/reconciler/reconciler.go b/pkg/reconciler/reconciler.go
-index dd64819..b8bc7b0 100644
+index 2b6f070..9daea10 100644
 --- a/pkg/reconciler/reconciler.go
 +++ b/pkg/reconciler/reconciler.go
 @@ -57,6 +57,7 @@ import (
@@ -93,7 +93,7 @@ index dd64819..b8bc7b0 100644
  // WithValueTranslator is an Option that configures a function that translates a
  // custom resource to the values passed to Helm.
  // Use this if you need to customize the logic that translates your custom resource to Helm values.
-@@ -622,6 +656,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
+@@ -622,6 +656,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
  	}
  	u.UpdateStatus(updater.EnsureCondition(conditions.Initialized(corev1.ConditionTrue, "", "")))
  
@@ -110,7 +110,7 @@ index dd64819..b8bc7b0 100644
  	if obj.GetDeletionTimestamp() != nil {
  		if err := r.handleDeletion(ctx, actionClient, obj, log); err != nil {
  			return ctrl.Result{}, err
-@@ -684,6 +728,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
+@@ -684,6 +728,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
  		}
  	}
  
