@@ -1,0 +1,237 @@
+From 10aa91d2149e4ff369a622daa56c80d9772f11e2 Mon Sep 17 00:00:00 2001
+From: Vlad Bologa <vbologa@redhat.com>
+Date: Mon, 19 Sep 2022 11:31:09 +0200
+Subject: [PATCH 10/12] ROX-12219: Add support for pause-reconcile annotation
+ (#29)
+
+Co-authored-by: Marcin Owsiany <porridge@redhat.com>
+---
+ .../internal/conditions/conditions.go         | 12 +++-
+ pkg/reconciler/internal/updater/updater.go    |  6 ++
+ pkg/reconciler/reconciler.go                  | 48 +++++++++++--
+ pkg/reconciler/reconciler_test.go             | 67 +++++++++++++++++++
+ 4 files changed, 125 insertions(+), 8 deletions(-)
+
+diff --git a/pkg/reconciler/internal/conditions/conditions.go b/pkg/reconciler/internal/conditions/conditions.go
+index 86beb90..12ee6a4 100644
+--- a/pkg/reconciler/internal/conditions/conditions.go
++++ b/pkg/reconciler/internal/conditions/conditions.go
+@@ -29,10 +29,12 @@ const (
+ 	TypeDeployed       = "Deployed"
+ 	TypeReleaseFailed  = "ReleaseFailed"
+ 	TypeIrreconcilable = "Irreconcilable"
++	TypePaused         = "Paused"
+ 
+-	ReasonInstallSuccessful   = status.ConditionReason("InstallSuccessful")
+-	ReasonUpgradeSuccessful   = status.ConditionReason("UpgradeSuccessful")
+-	ReasonUninstallSuccessful = status.ConditionReason("UninstallSuccessful")
++	ReasonInstallSuccessful            = status.ConditionReason("InstallSuccessful")
++	ReasonUpgradeSuccessful            = status.ConditionReason("UpgradeSuccessful")
++	ReasonUninstallSuccessful          = status.ConditionReason("UninstallSuccessful")
++	ReasonPauseReconcileAnnotationTrue = status.ConditionReason("PauseReconcileAnnotationTrue")
+ 
+ 	ReasonErrorGettingClient       = status.ConditionReason("ErrorGettingClient")
+ 	ReasonErrorGettingValues       = status.ConditionReason("ErrorGettingValues")
+@@ -60,6 +62,10 @@ func Irreconcilable(stat corev1.ConditionStatus, reason status.ConditionReason,
+ 	return newCondition(TypeIrreconcilable, stat, reason, message)
+ }
+ 
++func Paused(stat corev1.ConditionStatus, reason status.ConditionReason, message interface{}) status.Condition {
++	return newCondition(TypePaused, stat, reason, message)
++}
++
+ func newCondition(t status.ConditionType, s corev1.ConditionStatus, r status.ConditionReason, m interface{}) status.Condition {
+ 	message := fmt.Sprintf("%s", m)
+ 	return status.Condition{
+diff --git a/pkg/reconciler/internal/updater/updater.go b/pkg/reconciler/internal/updater/updater.go
+index 19e84af..4c4bd31 100644
+--- a/pkg/reconciler/internal/updater/updater.go
++++ b/pkg/reconciler/internal/updater/updater.go
+@@ -158,6 +158,12 @@ func EnsureConditionUnknown(t status.ConditionType) UpdateStatusFunc {
+ 	}
+ }
+ 
++func EnsureConditionAbsent(t status.ConditionType) UpdateStatusFunc {
++	return func(status *helmAppStatus) bool {
++		return status.Conditions.RemoveCondition(t)
++	}
++}
++
+ func EnsureDeployedRelease(rel *release.Release) UpdateStatusFunc {
+ 	return func(status *helmAppStatus) bool {
+ 		newRel := helmAppReleaseFor(rel)
+diff --git a/pkg/reconciler/reconciler.go b/pkg/reconciler/reconciler.go
+index 338e492..4e055f7 100644
+--- a/pkg/reconciler/reconciler.go
++++ b/pkg/reconciler/reconciler.go
+@@ -92,11 +92,12 @@ type Reconciler struct {
+ 
+ 	stripManifestFromStatus bool
+ 
+-	annotSetupOnce       sync.Once
+-	annotations          map[string]struct{}
+-	installAnnotations   map[string]annotation.Install
+-	upgradeAnnotations   map[string]annotation.Upgrade
+-	uninstallAnnotations map[string]annotation.Uninstall
++	annotSetupOnce           sync.Once
++	annotations              map[string]struct{}
++	installAnnotations       map[string]annotation.Install
++	upgradeAnnotations       map[string]annotation.Upgrade
++	uninstallAnnotations     map[string]annotation.Uninstall
++	pauseReconcileAnnotation string
+ }
+ 
+ type watchDescription struct {
+@@ -476,6 +477,18 @@ func WithUninstallAnnotations(as ...annotation.Uninstall) Option {
+ 	}
+ }
+ 
++// WithPauseReconcileAnnotation is an Option that sets
++// a PauseReconcile annotation. If the Custom Resource watched by this
++// reconciler has the given annotation, and its value is set to `true`,
++// then reconciliation for this CR will not be performed until this annotation
++// is removed.
++func WithPauseReconcileAnnotation(annotationName string) Option {
++	return func(r *Reconciler) error {
++		r.pauseReconcileAnnotation = annotationName
++		return nil
++	}
++}
++
+ // WithPreHook is an Option that configures the reconciler to run the given
+ // PreHook just before performing any actions (e.g. install, upgrade, uninstall,
+ // or reconciliation).
+@@ -668,6 +681,31 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
+ 		}
+ 	}()
+ 
++	if r.pauseReconcileAnnotation != "" {
++		if v, ok := obj.GetAnnotations()[r.pauseReconcileAnnotation]; ok {
++			if v == "true" {
++				log.Info(fmt.Sprintf("Resource has '%s' annotation set to 'true', reconcile paused.", r.pauseReconcileAnnotation))
++				u.UpdateStatus(
++					updater.EnsureCondition(conditions.Paused(corev1.ConditionTrue, conditions.ReasonPauseReconcileAnnotationTrue, "")),
++					updater.EnsureConditionUnknown(conditions.TypeIrreconcilable),
++					updater.EnsureConditionUnknown(conditions.TypeDeployed),
++					updater.EnsureConditionUnknown(conditions.TypeInitialized),
++					updater.EnsureConditionUnknown(conditions.TypeReleaseFailed),
++					updater.EnsureDeployedRelease(nil),
++				)
++				return ctrl.Result{}, nil
++			}
++		}
++	}
++
++	u.UpdateStatus(
++		// TODO(ROX-12637): change to updater.EnsureCondition(conditions.Paused(corev1.ConditionFalse, "", "")))
++		// once stackrox operator with pause support is released.
++		// At that time also add `Paused` to the list of conditions expected in stackrox operator e2e tests.
++		// Otherwise, the number of conditions in the `status.conditions` list will vary depending on the version
++		// of used operator, which is cumbersome due to https://github.com/kudobuilder/kuttl/issues/76
++		updater.EnsureConditionAbsent(conditions.TypePaused))
++
+ 	actionClient, err := r.actionClientGetter.ActionClientFor(ctx, obj)
+ 	if err != nil {
+ 		u.UpdateStatus(
+diff --git a/pkg/reconciler/reconciler_test.go b/pkg/reconciler/reconciler_test.go
+index 3ff7780..bc57087 100644
+--- a/pkg/reconciler/reconciler_test.go
++++ b/pkg/reconciler/reconciler_test.go
+@@ -402,6 +402,13 @@ var _ = Describe("Reconciler", func() {
+ 				}))
+ 			})
+ 		})
++		_ = Describe("WithPauseReconcileAnnotation", func() {
++			It("should set the pauseReconcileAnnotation field to the annotation name", func() {
++				a := "my.domain/pause-reconcile"
++				Expect(WithPauseReconcileAnnotation(a)(r)).To(Succeed())
++				Expect(r.pauseReconcileAnnotation).To(Equal(a))
++			})
++		})
+ 		_ = Describe("WithPreHook", func() {
+ 			It("should set a reconciler prehook", func() {
+ 				called := false
+@@ -543,6 +550,7 @@ var _ = Describe("Reconciler", func() {
+ 						WithInstallAnnotations(annotation.InstallDescription{}),
+ 						WithUpgradeAnnotations(annotation.UpgradeDescription{}),
+ 						WithUninstallAnnotations(annotation.UninstallDescription{}),
++						WithPauseReconcileAnnotation("my.domain/pause-reconcile"),
+ 						WithOverrideValues(map[string]string{
+ 							"image.repository": "custom-nginx",
+ 						}),
+@@ -557,6 +565,7 @@ var _ = Describe("Reconciler", func() {
+ 						WithInstallAnnotations(annotation.InstallDescription{}),
+ 						WithUpgradeAnnotations(annotation.UpgradeDescription{}),
+ 						WithUninstallAnnotations(annotation.UninstallDescription{}),
++						WithPauseReconcileAnnotation("my.domain/pause-reconcile"),
+ 						WithOverrideValues(map[string]string{
+ 							"image.repository": "custom-nginx",
+ 						}),
+@@ -1382,6 +1391,64 @@ var _ = Describe("Reconciler", func() {
+ 									verifyNoRelease(ctx, mgr.GetClient(), obj.GetNamespace(), obj.GetName(), currentRelease)
+ 								})
+ 
++								By("ensuring the finalizer is removed and the CR is deleted", func() {
++									err := mgr.GetAPIReader().Get(ctx, objKey, obj)
++									Expect(apierrors.IsNotFound(err)).To(BeTrue())
++								})
++							})
++						})
++						When("pause-reconcile annotation is present", func() {
++							It("pauses reconciliation", func() {
++								By("adding the pause-reconcile annotation to the CR", func() {
++									Expect(mgr.GetClient().Get(ctx, objKey, obj)).To(Succeed())
++									obj.SetAnnotations(map[string]string{"my.domain/pause-reconcile": "true"})
++									obj.Object["spec"] = map[string]interface{}{"replicaCount": "666"}
++									Expect(mgr.GetClient().Update(ctx, obj)).To(Succeed())
++								})
++
++								By("deleting the CR", func() {
++									Expect(mgr.GetClient().Delete(ctx, obj)).To(Succeed())
++								})
++
++								By("successfully reconciling a request when paused", func() {
++									res, err := r.Reconcile(ctx, req)
++									Expect(res).To(Equal(reconcile.Result{}))
++									Expect(err).To(BeNil())
++								})
++
++								By("getting the CR", func() {
++									Expect(mgr.GetAPIReader().Get(ctx, objKey, obj)).To(Succeed())
++								})
++
++								By("verifying the CR status is Paused", func() {
++									objStat := &objStatus{}
++									Expect(runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, objStat)).To(Succeed())
++									Expect(objStat.Status.Conditions.IsTrueFor(conditions.TypePaused)).To(BeTrue())
++								})
++
++								By("verifying the release has not changed", func() {
++									rel, err := ac.Get(obj.GetName())
++									Expect(err).To(BeNil())
++									Expect(rel).NotTo(BeNil())
++									Expect(*rel).To(Equal(*currentRelease))
++								})
++
++								By("removing the pause-reconcile annotation from the CR", func() {
++									Expect(mgr.GetClient().Get(ctx, objKey, obj)).To(Succeed())
++									obj.SetAnnotations(nil)
++									Expect(mgr.GetClient().Update(ctx, obj)).To(Succeed())
++								})
++
++								By("successfully reconciling a request", func() {
++									res, err := r.Reconcile(ctx, req)
++									Expect(res).To(Equal(reconcile.Result{}))
++									Expect(err).To(BeNil())
++								})
++
++								By("verifying the release is uninstalled", func() {
++									verifyNoRelease(ctx, mgr.GetClient(), obj.GetNamespace(), obj.GetName(), currentRelease)
++								})
++
+ 								By("ensuring the finalizer is removed and the CR is deleted", func() {
+ 									err := mgr.GetAPIReader().Get(ctx, objKey, obj)
+ 									Expect(apierrors.IsNotFound(err)).To(BeTrue())
+-- 
+2.48.1
+

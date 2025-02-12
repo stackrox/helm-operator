@@ -1,0 +1,240 @@
+From 0c607d24bf6732a5d8ce6dfac507c6dc7970f0e2 Mon Sep 17 00:00:00 2001
+From: Malte Isberner <2822367+misberner@users.noreply.github.com>
+Date: Tue, 6 Jul 2021 02:52:54 +0200
+Subject: [PATCH 06/12] ROX-7242: Make the operator preserve custom statuses,
+ and allow updating custom status through extensions (#17)
+
+---
+ pkg/extensions/types.go                       |  7 +-
+ pkg/reconciler/internal/updater/updater.go    | 40 +++++++++--
+ .../internal/updater/updater_test.go          | 70 ++++++++++++++++++-
+ pkg/reconciler/reconciler.go                  |  6 +-
+ 4 files changed, 111 insertions(+), 12 deletions(-)
+
+diff --git a/pkg/extensions/types.go b/pkg/extensions/types.go
+index 689f91d..fe449f8 100644
+--- a/pkg/extensions/types.go
++++ b/pkg/extensions/types.go
+@@ -2,11 +2,16 @@ package extensions
+ 
+ import (
+ 	"context"
++
+ 	"github.com/go-logr/logr"
+ 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+ )
+ 
++// UpdateStatusFunc is a function that updates an unstructured status. If the status has been modified,
++// true must be returned, false otherwise.
++type UpdateStatusFunc func(*unstructured.Unstructured) bool
++
+ // ReconcileExtension is an arbitrary extension that can be implemented to run either before
+ // or after the main Helm reconciliation action.
+ // An error returned by a ReconcileExtension will cause the Reconcile to fail, unlike a hook error.
+-type ReconcileExtension func(context.Context, *unstructured.Unstructured, logr.Logger) error
++type ReconcileExtension func(context.Context, *unstructured.Unstructured, func(UpdateStatusFunc), logr.Logger) error
+diff --git a/pkg/reconciler/internal/updater/updater.go b/pkg/reconciler/internal/updater/updater.go
+index 1508c32..dccabe1 100644
+--- a/pkg/reconciler/internal/updater/updater.go
++++ b/pkg/reconciler/internal/updater/updater.go
+@@ -28,6 +28,7 @@ import (
+ 	"k8s.io/client-go/util/retry"
+ 	"sigs.k8s.io/controller-runtime/pkg/client"
+ 
++	"github.com/operator-framework/helm-operator/pkg/extensions"
+ 	"github.com/operator-framework/helm-operator-plugins/internal/sdk/controllerutil"
+ 	"github.com/operator-framework/helm-operator-plugins/pkg/internal/status"
+ )
+@@ -56,6 +57,21 @@ func (u *Updater) UpdateStatus(fs ...UpdateStatusFunc) {
+ 	u.updateStatusFuncs = append(u.updateStatusFuncs, fs...)
+ }
+ 
++func (u *Updater) UpdateStatusCustom(f extensions.UpdateStatusFunc) {
++	updateFn := func(status *helmAppStatus) bool {
++		status.updateStatusObject()
++
++		unstructuredStatus := unstructured.Unstructured{Object: status.StatusObject}
++		if !f(&unstructuredStatus) {
++			return false
++		}
++		_ = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructuredStatus.Object, status)
++		status.StatusObject = unstructuredStatus.Object
++		return true
++	}
++	u.UpdateStatus(updateFn)
++}
++
+ func (u *Updater) CancelUpdates() {
+ 	u.isCanceled = true
+ }
+@@ -94,12 +110,8 @@ func (u *Updater) Apply(ctx context.Context, obj *unstructured.Unstructured) err
+ 	// we remove the finalizer, updating the status will fail
+ 	// because the object and its status will be garbage-collected.
+ 	if needsStatusUpdate {
+-		uSt, err := runtime.DefaultUnstructuredConverter.ToUnstructured(st)
+-		if err != nil {
+-			return err
+-		}
+-		obj.Object["status"] = uSt
+-
++		st.updateStatusObject()
++		obj.Object["status"] = st.StatusObject
+ 		if err := retryOnRetryableUpdateError(backoff, func() error {
+ 			return u.client.Status().Update(ctx, obj)
+ 		}); err != nil {
+@@ -166,10 +178,25 @@ func RemoveDeployedRelease() UpdateStatusFunc {
+ }
+ 
+ type helmAppStatus struct {
++	StatusObject map[string]interface{} `json:"-"`
++
+ 	Conditions      status.Conditions `json:"conditions"`
+ 	DeployedRelease *helmAppRelease   `json:"deployedRelease,omitempty"`
+ }
+ 
++func (s *helmAppStatus) updateStatusObject() {
++	unstructuredHelmAppStatus, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(s)
++	if s.StatusObject == nil {
++		s.StatusObject = make(map[string]interface{})
++	}
++	s.StatusObject["conditions"] = unstructuredHelmAppStatus["conditions"]
++	if deployedRelease := unstructuredHelmAppStatus["deployedRelease"]; deployedRelease != nil {
++		s.StatusObject["deployedRelease"] = deployedRelease
++	} else {
++		delete(s.StatusObject, "deployedRelease")
++	}
++}
++
+ type helmAppRelease struct {
+ 	Name     string `json:"name,omitempty"`
+ 	Manifest string `json:"manifest,omitempty"`
+@@ -192,6 +219,7 @@ func statusFor(obj *unstructured.Unstructured) *helmAppStatus {
+ 	case map[string]interface{}:
+ 		out := &helmAppStatus{}
+ 		_ = runtime.DefaultUnstructuredConverter.FromUnstructured(s, out)
++		out.StatusObject = s
+ 		return out
+ 	default:
+ 		return &helmAppStatus{}
+diff --git a/pkg/reconciler/internal/updater/updater_test.go b/pkg/reconciler/internal/updater/updater_test.go
+index fa84e86..e42b1c5 100644
+--- a/pkg/reconciler/internal/updater/updater_test.go
++++ b/pkg/reconciler/internal/updater/updater_test.go
+@@ -108,6 +108,71 @@ var _ = Describe("Updater", func() {
+ 			Expect((obj.Object["status"].(map[string]interface{}))["conditions"]).To(HaveLen(1))
+ 			Expect(obj.GetResourceVersion()).NotTo(Equal(resourceVersion))
+ 		})
++
++		It("should support a mix of standard and custom status updates", func() {
++			u.UpdateStatus(EnsureCondition(conditions.Deployed(corev1.ConditionTrue, "", "")))
++			u.UpdateStatusCustom(func(uSt *unstructured.Unstructured) bool {
++				Expect(unstructured.SetNestedMap(uSt.Object, map[string]interface{}{"bar": "baz"}, "foo")).To(Succeed())
++				return true
++			})
++			u.UpdateStatus(EnsureCondition(conditions.Irreconcilable(corev1.ConditionFalse, "", "")))
++			u.UpdateStatusCustom(func(uSt *unstructured.Unstructured) bool {
++				Expect(unstructured.SetNestedField(uSt.Object, "quux", "foo", "qux")).To(Succeed())
++				return true
++			})
++			u.UpdateStatus(EnsureCondition(conditions.Initialized(corev1.ConditionTrue, "", "")))
++
++			Expect(u.Apply(context.TODO(), obj)).To(Succeed())
++			Expect(cl.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
++			Expect((obj.Object["status"].(map[string]interface{}))["conditions"]).To(HaveLen(3))
++			_, found, err := unstructured.NestedFieldNoCopy(obj.Object, "status", "deployedRelease")
++			Expect(found).To(BeFalse())
++			Expect(err).To(Not(HaveOccurred()))
++
++			val, found, err := unstructured.NestedString(obj.Object, "status", "foo", "bar")
++			Expect(val).To(Equal("baz"))
++			Expect(found).To(BeTrue())
++			Expect(err).To(Not(HaveOccurred()))
++
++			val, found, err = unstructured.NestedString(obj.Object, "status", "foo", "qux")
++			Expect(val).To(Equal("quux"))
++			Expect(found).To(BeTrue())
++			Expect(err).To(Not(HaveOccurred()))
++		})
++
++		It("should preserve any custom status across multiple apply calls", func() {
++			u.UpdateStatusCustom(func(uSt *unstructured.Unstructured) bool {
++				Expect(unstructured.SetNestedMap(uSt.Object, map[string]interface{}{"bar": "baz"}, "foo")).To(Succeed())
++				return true
++			})
++			Expect(u.Apply(context.TODO(), obj)).To(Succeed())
++
++			Expect(cl.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
++
++			_, found, err := unstructured.NestedFieldNoCopy(obj.Object, "status", "deployedRelease")
++			Expect(found).To(BeFalse())
++			Expect(err).To(Not(HaveOccurred()))
++
++			val, found, err := unstructured.NestedString(obj.Object, "status", "foo", "bar")
++			Expect(val).To(Equal("baz"))
++			Expect(found).To(BeTrue())
++			Expect(err).To(Succeed())
++
++			u.UpdateStatus(EnsureCondition(conditions.Deployed(corev1.ConditionTrue, "", "")))
++			Expect(u.Apply(context.TODO(), obj)).To(Succeed())
++
++			Expect(cl.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
++			Expect((obj.Object["status"].(map[string]interface{}))["conditions"]).To(HaveLen(1))
++
++			_, found, err = unstructured.NestedFieldNoCopy(obj.Object, "status", "deployedRelease")
++			Expect(found).To(BeFalse())
++			Expect(err).To(Not(HaveOccurred()))
++
++			val, found, err = unstructured.NestedString(obj.Object, "status", "foo", "bar")
++			Expect(val).To(Equal("baz"))
++			Expect(found).To(BeTrue())
++			Expect(err).To(Succeed())
++		})
+ 	})
+ })
+ 
+@@ -244,8 +309,9 @@ var _ = Describe("statusFor", func() {
+ 	})
+ 
+ 	It("should handle map[string]interface{}", func() {
+-		obj.Object["status"] = map[string]interface{}{}
+-		Expect(statusFor(obj)).To(Equal(&helmAppStatus{}))
++		uSt := map[string]interface{}{}
++		obj.Object["status"] = uSt
++		Expect(statusFor(obj)).To(Equal(&helmAppStatus{StatusObject: uSt}))
+ 	})
+ 
+ 	It("should handle arbitrary types", func() {
+diff --git a/pkg/reconciler/reconciler.go b/pkg/reconciler/reconciler.go
+index 16568ff..bbdd5b1 100644
+--- a/pkg/reconciler/reconciler.go
++++ b/pkg/reconciler/reconciler.go
+@@ -683,7 +683,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
+ 	u.UpdateStatus(updater.EnsureCondition(conditions.Initialized(corev1.ConditionTrue, "", "")))
+ 
+ 	for _, ext := range r.preExtensions {
+-		if err := ext(ctx, obj, r.log); err != nil {
++		if err := ext(ctx, obj, u.UpdateStatusCustom, r.log); err != nil {
+ 			u.UpdateStatus(
+ 				updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionTrue, conditions.ReasonReconcileError, err)),
+ 				updater.EnsureConditionUnknown(conditions.TypeReleaseFailed),
+@@ -759,7 +759,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
+ 	}
+ 
+ 	for _, ext := range r.postExtensions {
+-		if err := ext(ctx, obj, r.log); err != nil {
++		if err := ext(ctx, obj, u.UpdateStatusCustom, r.log); err != nil {
+ 			u.UpdateStatus(
+ 				updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionTrue, conditions.ReasonReconcileError, err)),
+ 				updater.EnsureConditionUnknown(conditions.TypeReleaseFailed),
+@@ -1031,7 +1031,7 @@ func (r *Reconciler) doUninstall(ctx context.Context, actionClient helmclient.Ac
+ 	}
+ 
+ 	for _, ext := range r.postExtensions {
+-		if err := ext(ctx, obj, r.log); err != nil {
++		if err := ext(ctx, obj, u.UpdateStatusCustom, r.log); err != nil {
+ 			u.UpdateStatus(
+ 				updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionTrue, conditions.ReasonReconcileError, err)),
+ 				updater.EnsureConditionUnknown(conditions.TypeReleaseFailed),
+-- 
+2.48.1
+

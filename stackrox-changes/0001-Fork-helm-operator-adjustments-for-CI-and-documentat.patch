@@ -1,0 +1,130 @@
+From d1dcbdfa2a7499c1bfab389445cc3ca5e2976376 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Simon=20B=C3=A4umer?= <baeumer@pm.me>
+Date: Tue, 18 May 2021 19:21:56 +0200
+Subject: [PATCH 01/12] Fork helm-operator adjustments for CI and documentation
+ (#4)
+
+---
+ .github/labeler.yml          |  2 ++
+ .github/workflows/ci.yml     |  6 +----
+ .github/workflows/deploy.yml | 19 ++++++++--------
+ README.md                    | 44 ++++++++++++++++++++++++++++++++++--
+ 4 files changed, 55 insertions(+), 16 deletions(-)
+
+diff --git a/.github/labeler.yml b/.github/labeler.yml
+index 4dc4ae9..6b2ba9e 100644
+--- a/.github/labeler.yml
++++ b/.github/labeler.yml
+@@ -1,3 +1,5 @@
++upstream-triage:
++  - "./*"
+ area/main-binary:
+ - changed-files:
+   - any-glob-to-any-file:
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index 3b538af..d52ba7e 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -1,11 +1,7 @@
+ name: CI
+ 
+ on:
+-  merge_group:
+-  push:
+-    branches:
+-      - 'main'
+-  pull_request:
++  - push
+ 
+ jobs:
+   test:
+diff --git a/.github/workflows/deploy.yml b/.github/workflows/deploy.yml
+index 204b18f..2c75ca0 100644
+--- a/.github/workflows/deploy.yml
++++ b/.github/workflows/deploy.yml
+@@ -1,14 +1,15 @@
+ name: Deploy
+ 
+-on:
+-  merge_group:
+-  push:
+-    branches:
+-      - 'main'
+-    tags:
+-      - 'v*'
+-  pull_request:
+-    branches: [ main ]
++# Disabled as we don't need docker images to use the helm-operator as a library.
++#on:
++#  merge_group:
++#  push:
++#    branches:
++#      - 'main'
++#    tags:
++#      - 'v*'
++#  pull_request:
++#    branches: [ main ]
+ 
+ jobs:
+   goreleaser:
+diff --git a/README.md b/README.md
+index 5123a9d..90dce68 100644
+--- a/README.md
++++ b/README.md
+@@ -1,7 +1,6 @@
+ # helm-operator
+ 
+-![Build Status](https://github.com/operator-framework/helm-operator-plugins/workflows/CI/badge.svg?branch=main)
+-[![Coverage Status](https://coveralls.io/repos/github/operator-framework/helm-operator-plugins/badge.svg?branch=main)](https://coveralls.io/github/operator-framework/helm-operator-plugins?branch=main)
++[![Build Status](https://github.com/stackrox/helm-operator/workflows/CI/badge.svg?branch=main)
+ 
+ Reimplementation of the helm operator to enrich the Helm operator's reconciliation with custom Go code to create a 
+ hybrid operator.
+@@ -41,3 +40,44 @@ if err := reconciler.SetupWithManager(mgr); err != nil {
+  panic(fmt.Sprintf("unable to create reconciler: %s", err))
+ }
+ ```
++
++## Why a fork?
++
++Initially the Helm operator type was designed to automate Helm chart operations
++by mapping the [values](https://helm.sh/docs/chart_template_guide/values_files/) of a Helm chart exactly to a 
++`CustomResourceDefinition` and defining its watched resources in a `watches.yaml` 
++[configuration](https://sdk.operatorframework.io/docs/building-operators/helm/tutorial/#watch-the-nginx-cr).
++
++To write a [Level II+](https://sdk.operatorframework.io/docs/advanced-topics/operator-capabilities/operator-capabilities/) operator 
++which reuses an already existing Helm chart a [hybrid](https://github.com/operator-framework/operator-sdk/issues/670)
++between the Go and Helm operator type is necessary.
++
++The hybrid approach allows to add customizations to the Helm operator like value mapping based on cluster state or
++executing code in on specific events.
++
++### Quickstart
++
++Add this module as a replace directive to your `go.mod`:
++
++```
++go mod edit -replace=github.com/joelanford/helm-operator=github.com/stackrox/helm-operator@main
++```
++
++Example:
++
++```
++chart, err := loader.Load("path/to/chart")
++if err != nil {
++    panic(err)
++}
++
++reconciler := reconciler.New(
++    reconciler.WithChart(*chart),
++    reconciler.WithGroupVersionKind(gvk),
++)
++
++if err := reconciler.SetupWithManager(mgr); err != nil {
++    panic(fmt.Sprintf("unable to create reconciler: %s", err))
++}
++```
++
+-- 
+2.48.1
+

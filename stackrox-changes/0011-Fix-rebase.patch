@@ -1,0 +1,24 @@
+From 9b91dd7a2ed9b632d1e62c923604705398053ee2 Mon Sep 17 00:00:00 2001
+From: Ludovic Cleroux <ludydoo@gmail.com>
+Date: Fri, 4 Aug 2023 15:28:54 +0200
+Subject: [PATCH 11/12] Fix rebase
+
+---
+ pkg/reconciler/reconciler.go | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/pkg/reconciler/reconciler.go b/pkg/reconciler/reconciler.go
+index 4e055f7..dfd78b1 100644
+--- a/pkg/reconciler/reconciler.go
++++ b/pkg/reconciler/reconciler.go
+@@ -1228,7 +1228,6 @@ func (r *Reconciler) ensureDeployedRelease(u *updater.Updater, rel *release.Rele
+ 		rel = &relCopy
+ 	}
+ 
+-	u.Update(updater.EnsureFinalizer(uninstallFinalizer))
+ 	u.UpdateStatus(
+ 		updater.EnsureCondition(conditions.Deployed(corev1.ConditionTrue, reason, message)),
+ 		updater.EnsureDeployedRelease(rel),
+-- 
+2.48.1
+

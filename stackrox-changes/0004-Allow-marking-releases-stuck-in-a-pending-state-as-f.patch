@@ -1,0 +1,211 @@
+From ac3969587d768d5cec3d1bab4c455005d31c5fb0 Mon Sep 17 00:00:00 2001
+From: Malte Isberner <2822367+misberner@users.noreply.github.com>
+Date: Tue, 29 Jun 2021 15:16:01 +0200
+Subject: [PATCH 04/12] Allow marking releases stuck in a pending state as
+ failed (#16)
+
+---
+ pkg/client/actionclient.go                    |  9 ++++
+ .../internal/conditions/conditions.go         |  1 +
+ pkg/reconciler/internal/fake/actionclient.go  | 34 +++++++++----
+ pkg/reconciler/reconciler.go                  | 51 +++++++++++++++++++
+ 4 files changed, 84 insertions(+), 11 deletions(-)
+
+diff --git a/pkg/client/actionclient.go b/pkg/client/actionclient.go
+index 5cba3dd..6655ad7 100644
+--- a/pkg/client/actionclient.go
++++ b/pkg/client/actionclient.go
+@@ -54,6 +54,7 @@ type ActionInterface interface {
+ 	Get(name string, opts ...GetOption) (*release.Release, error)
+ 	Install(name, namespace string, chrt *chart.Chart, vals map[string]interface{}, opts ...InstallOption) (*release.Release, error)
+ 	Upgrade(name, namespace string, chrt *chart.Chart, vals map[string]interface{}, opts ...UpgradeOption) (*release.Release, error)
++	MarkFailed(release *release.Release, reason string) error
+ 	Uninstall(name string, opts ...UninstallOption) (*release.UninstallReleaseResponse, error)
+ 	Reconcile(rel *release.Release) error
+ }
+@@ -278,6 +279,14 @@ func (c *actionClient) Upgrade(name, namespace string, chrt *chart.Chart, vals m
+ 	return rel, nil
+ }
+ 
++func (c *actionClient) MarkFailed(rel *release.Release, reason string) error {
++	infoCopy := *rel.Info
++	releaseCopy := *rel
++	releaseCopy.Info = &infoCopy
++	releaseCopy.SetStatus(release.StatusFailed, reason)
++	return c.conf.Releases.Update(&releaseCopy)
++}
++
+ func (c *actionClient) rollback(name string, opts ...RollbackOption) error {
+ 	rollback := action.NewRollback(c.conf)
+ 	for _, o := range opts {
+diff --git a/pkg/reconciler/internal/conditions/conditions.go b/pkg/reconciler/internal/conditions/conditions.go
+index 55e2c65..86beb90 100644
+--- a/pkg/reconciler/internal/conditions/conditions.go
++++ b/pkg/reconciler/internal/conditions/conditions.go
+@@ -41,6 +41,7 @@ const (
+ 	ReasonUpgradeError             = status.ConditionReason("UpgradeError")
+ 	ReasonReconcileError           = status.ConditionReason("ReconcileError")
+ 	ReasonUninstallError           = status.ConditionReason("UninstallError")
++	ReasonPendingError             = status.ConditionReason("PendingError")
+ )
+ 
+ func Initialized(stat corev1.ConditionStatus, reason status.ConditionReason, message interface{}) status.Condition {
+diff --git a/pkg/reconciler/internal/fake/actionclient.go b/pkg/reconciler/internal/fake/actionclient.go
+index e35cb3f..f5ce268 100644
+--- a/pkg/reconciler/internal/fake/actionclient.go
++++ b/pkg/reconciler/internal/fake/actionclient.go
+@@ -49,17 +49,19 @@ func (hcg *fakeActionClientGetter) ActionClientFor(_ context.Context, _ crclient
+ }
+ 
+ type ActionClient struct {
+-	Gets       []GetCall
+-	Installs   []InstallCall
+-	Upgrades   []UpgradeCall
+-	Uninstalls []UninstallCall
+-	Reconciles []ReconcileCall
+-
+-	HandleGet       func() (*release.Release, error)
+-	HandleInstall   func() (*release.Release, error)
+-	HandleUpgrade   func() (*release.Release, error)
+-	HandleUninstall func() (*release.UninstallReleaseResponse, error)
+-	HandleReconcile func() error
++	Gets        []GetCall
++	Installs    []InstallCall
++	Upgrades    []UpgradeCall
++	MarkFaileds []MarkFailedCall
++	Uninstalls  []UninstallCall
++	Reconciles  []ReconcileCall
++
++	HandleGet        func() (*release.Release, error)
++	HandleInstall    func() (*release.Release, error)
++	HandleUpgrade    func() (*release.Release, error)
++	HandleMarkFailed func() error
++	HandleUninstall  func() (*release.UninstallReleaseResponse, error)
++	HandleReconcile  func() error
+ }
+ 
+ func NewActionClient() ActionClient {
+@@ -110,6 +112,11 @@ type UpgradeCall struct {
+ 	Opts      []client.UpgradeOption
+ }
+ 
++type MarkFailedCall struct {
++	Release *release.Release
++	Reason  string
++}
++
+ type UninstallCall struct {
+ 	Name string
+ 	Opts []client.UninstallOption
+@@ -134,6 +141,11 @@ func (c *ActionClient) Upgrade(name, namespace string, chrt *chart.Chart, vals m
+ 	return c.HandleUpgrade()
+ }
+ 
++func (c *ActionClient) MarkFailed(rel *release.Release, reason string) error {
++	c.MarkFaileds = append(c.MarkFaileds, MarkFailedCall{rel, reason})
++	return c.HandleMarkFailed()
++}
++
+ func (c *ActionClient) Uninstall(name string, opts ...client.UninstallOption) (*release.UninstallReleaseResponse, error) {
+ 	c.Uninstalls = append(c.Uninstalls, UninstallCall{name, opts})
+ 	return c.HandleUninstall()
+diff --git a/pkg/reconciler/reconciler.go b/pkg/reconciler/reconciler.go
+index b8bc7b0..72957fc 100644
+--- a/pkg/reconciler/reconciler.go
++++ b/pkg/reconciler/reconciler.go
+@@ -85,6 +85,7 @@ type Reconciler struct {
+ 	reconcilePeriod                  time.Duration
+ 	waitForDeletionTimeout           time.Duration
+ 	maxReleaseHistory                *int
++	markFailedAfter                  time.Duration
+ 	skipPrimaryGVKSchemeRegistration bool
+ 	controllerSetupFuncs             []ControllerSetupFunc
+ 
+@@ -380,6 +381,18 @@ func WithMaxReleaseHistory(maxHistory int) Option {
+ 	}
+ }
+ 
++// WithMarkFailedAfter specifies the duration after which the reconciler will mark a release in a pending (locked)
++// state as false in order to allow rolling forward.
++func WithMarkFailedAfter(duration time.Duration) Option {
++	return func(r *Reconciler) error {
++		if duration < 0 {
++			return errors.New("auto-rollback after duration must not be negative")
++		}
++		r.markFailedAfter = duration
++		return nil
++	}
++}
++
+ // WithInstallAnnotations is an Option that configures Install annotations
+ // to enable custom action.Install fields to be set based on the value of
+ // annotations found in the custom resource watched by this reconciler.
+@@ -693,6 +706,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
+ 		)
+ 		return ctrl.Result{}, err
+ 	}
++	if state == statePending {
++		return r.handlePending(actionClient, rel, &u, log)
++	}
++
+ 	u.UpdateStatus(updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionFalse, "", "")))
+ 
+ 	for _, h := range r.preHooks {
+@@ -769,6 +786,7 @@ const (
+ 	stateNeedsInstall helmReleaseState = "needs install"
+ 	stateNeedsUpgrade helmReleaseState = "needs upgrade"
+ 	stateUnchanged    helmReleaseState = "unchanged"
++	statePending      helmReleaseState = "pending"
+ 	stateError        helmReleaseState = "error"
+ )
+ 
+@@ -818,6 +836,10 @@ func (r *Reconciler) getReleaseState(client helmclient.ActionInterface, obj meta
+ 		return nil, stateNeedsInstall, nil
+ 	}
+ 
++	if currentRelease.Info != nil && currentRelease.Info.Status.IsPending() {
++		return currentRelease, statePending, nil
++	}
++
+ 	var opts []helmclient.UpgradeOption
+ 	if *r.maxReleaseHistory > 0 {
+ 		opts = append(opts, func(u *action.Upgrade) error {
+@@ -913,6 +935,35 @@ func (r *Reconciler) doUpgrade(actionClient helmclient.ActionInterface, u *updat
+ 	return rel, nil
+ }
+ 
++func (r *Reconciler) handlePending(actionClient helmclient.ActionInterface, rel *release.Release, u *updater.Updater, log logr.Logger) (ctrl.Result, error) {
++	err := r.doHandlePending(actionClient, rel, log)
++	if err == nil {
++		err = errors.New("unknown error handling pending release")
++	}
++	u.UpdateStatus(
++		updater.EnsureCondition(conditions.Irreconcilable(corev1.ConditionTrue, conditions.ReasonPendingError, err)))
++	return ctrl.Result{}, err
++}
++
++func (r *Reconciler) doHandlePending(actionClient helmclient.ActionInterface, rel *release.Release, log logr.Logger) error {
++	if r.markFailedAfter <= 0 {
++		return errors.New("Release is in a pending (locked) state and cannot be modified. User intervention is required.")
++	}
++	if rel.Info == nil || rel.Info.LastDeployed.IsZero() {
++		return errors.New("Release is in a pending (locked) state and lacks 'last deployed' timestamp. User intervention is required.")
++	}
++	if pendingSince := time.Since(rel.Info.LastDeployed.Time); pendingSince < r.markFailedAfter {
++		return fmt.Errorf("Release is in a pending (locked) state and cannot currently be modified. Release will be marked failed to allow a roll-forward in %v.", r.markFailedAfter-pendingSince)
++	}
++
++	log.Info("Marking release as failed", "releaseName", rel.Name)
++	err := actionClient.MarkFailed(rel, fmt.Sprintf("operator marked pending (locked) release as failed after state did not change for %v", r.markFailedAfter))
++	if err != nil {
++		return fmt.Errorf("Failed to mark pending (locked) release as failed: %w", err)
++	}
++	return fmt.Errorf("marked release %s as failed to allow upgrade to succeed in next reconcile attempt", rel.Name)
++}
++
+ func (r *Reconciler) reportOverrideEvents(obj runtime.Object) {
+ 	for k, v := range r.overrideValues {
+ 		r.eventRecorder.Eventf(obj, "Warning", "ValueOverridden",
+-- 
+2.48.1
+

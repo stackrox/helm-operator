@@ -1,0 +1,141 @@
+From 4f1b67d62ed973508a9539f9d4a85b17bcd04ca2 Mon Sep 17 00:00:00 2001
+From: Aleksandr Kurlov <sasha.kurlov@gmail.com>
+Date: Fri, 25 Aug 2023 17:20:00 +0200
+Subject: [PATCH 12/12] ROX-19221: Fix reconciling with label selector for
+ multiple reconcilers (#42)
+
+* Add filter predicate to secret kind watch
+
+* Change fix to filter resource in the reconcile function
+
+* Fix doc string typo
+
+* Update description for setting broken action client
+---
+ pkg/reconciler/reconciler.go      | 10 ++++++--
+ pkg/reconciler/reconciler_test.go | 39 +++++++++++++++++++++++++++++++
+ 2 files changed, 47 insertions(+), 2 deletions(-)
+
+diff --git a/pkg/reconciler/reconciler.go b/pkg/reconciler/reconciler.go
+index dfd78b1..f31a37e 100644
+--- a/pkg/reconciler/reconciler.go
++++ b/pkg/reconciler/reconciler.go
+@@ -41,6 +41,7 @@ import (
+ 	ctrl "sigs.k8s.io/controller-runtime"
+ 	"sigs.k8s.io/controller-runtime/pkg/client"
+ 	"sigs.k8s.io/controller-runtime/pkg/controller"
++	"sigs.k8s.io/controller-runtime/pkg/event"
+ 	"sigs.k8s.io/controller-runtime/pkg/handler"
+ 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+ 	"sigs.k8s.io/controller-runtime/pkg/source"
+@@ -277,7 +278,7 @@ func WithOverrideValues(overrides map[string]string) Option {
+ 	}
+ }
+ 
+-// WithDependentWatchesEnabled is an Option that configures whether the
++// SkipDependentWatches is an Option that configures whether the
+ // Reconciler will register watches for dependent objects in releases and
+ // trigger reconciliations when they change.
+ //
+@@ -608,7 +609,7 @@ func WithControllerSetupFunc(f ControllerSetupFunc) Option {
+ }
+ 
+ // ControllerSetup allows restricted access to the Controller using the WithControllerSetupFunc option.
+-// Currently the only supposed configuration is adding additional watchers do the controller.
++// Currently, the only supposed configuration is adding additional watchers do the controller.
+ type ControllerSetup interface {
+ 	// Watch takes events provided by a Source and uses the EventHandler to
+ 	// enqueue reconcile.Requests in response to the events.
+@@ -661,6 +662,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
+ 		return ctrl.Result{}, err
+ 	}
+ 
++	if r.selectorPredicate != nil && !r.selectorPredicate.Generic(event.GenericEvent{Object: obj}) {
++		log.V(1).Info("Label selector does not match, skipping reconcile")
++		return ctrl.Result{}, nil
++	}
++
+ 	// The finalizer must be present on the CR before we can do anything. Otherwise, if the reconciliation fails,
+ 	// there might be resources created by the chart that will not be garbage-collected
+ 	// (cluster-scoped resources or resources in other namespaces, which are not bound by an owner reference).
+diff --git a/pkg/reconciler/reconciler_test.go b/pkg/reconciler/reconciler_test.go
+index bc57087..a463952 100644
+--- a/pkg/reconciler/reconciler_test.go
++++ b/pkg/reconciler/reconciler_test.go
+@@ -501,6 +501,7 @@ var _ = Describe("Reconciler", func() {
+ 			Expect(mgr.GetCache().WaitForCacheSync(ctx)).To(BeTrue())
+ 
+ 			obj = testutil.BuildTestCR(gvk)
++			obj.SetLabels(map[string]string{"foo": "bar"})
+ 			objKey = types.NamespacedName{Namespace: obj.GetNamespace(), Name: obj.GetName()}
+ 			req = reconcile.Request{NamespacedName: objKey}
+ 		})
+@@ -533,6 +534,8 @@ var _ = Describe("Reconciler", func() {
+ 			cancel()
+ 		})
+ 
++		selector := metav1.LabelSelector{MatchLabels: map[string]string{"foo": "bar"}}
++
+ 		// After migration to Ginkgo v2 this can be rewritten using e.g. DescribeTable.
+ 		parameterizedReconcilerTests := func(opts reconcilerTestSuiteOpts) {
+ 			BeforeEach(func() {
+@@ -551,6 +554,7 @@ var _ = Describe("Reconciler", func() {
+ 						WithUpgradeAnnotations(annotation.UpgradeDescription{}),
+ 						WithUninstallAnnotations(annotation.UninstallDescription{}),
+ 						WithPauseReconcileAnnotation("my.domain/pause-reconcile"),
++						WithSelector(selector),
+ 						WithOverrideValues(map[string]string{
+ 							"image.repository": "custom-nginx",
+ 						}),
+@@ -566,6 +570,7 @@ var _ = Describe("Reconciler", func() {
+ 						WithUpgradeAnnotations(annotation.UpgradeDescription{}),
+ 						WithUninstallAnnotations(annotation.UninstallDescription{}),
+ 						WithPauseReconcileAnnotation("my.domain/pause-reconcile"),
++						WithSelector(selector),
+ 						WithOverrideValues(map[string]string{
+ 							"image.repository": "custom-nginx",
+ 						}),
+@@ -1455,6 +1460,40 @@ var _ = Describe("Reconciler", func() {
+ 								})
+ 							})
+ 						})
++						When("label selector succeeds", func() {
++							It("reconciles only matching label", func() {
++								By("setting an invalid action client getter to assert different reconcile results", func() {
++									r.actionClientGetter = helmclient.ActionClientGetterFunc(func(context.Context, client.Object) (helmclient.ActionInterface, error) {
++										fakeClient := helmfake.NewActionClient()
++										return &fakeClient, nil
++									})
++								})
++
++								By("setting not matching label to the CR", func() {
++									Expect(mgr.GetClient().Get(ctx, objKey, obj)).To(Succeed())
++									obj.SetLabels(map[string]string{"foo": "baz"})
++									Expect(mgr.GetClient().Update(ctx, obj)).To(Succeed())
++								})
++
++								By("reconciling is skipped, action client was not called and no error returned", func() {
++									res, err := r.Reconcile(ctx, req)
++									Expect(res).To(Equal(reconcile.Result{}))
++									Expect(err).To(BeNil())
++								})
++
++								By("setting matching label to the CR", func() {
++									Expect(mgr.GetClient().Get(ctx, objKey, obj)).To(Succeed())
++									obj.SetLabels(map[string]string{"foo": "bar"})
++									Expect(mgr.GetClient().Update(ctx, obj)).To(Succeed())
++								})
++
++								By("reconciling is not skipped and error returned because of  broken action client", func() {
++									res, err := r.Reconcile(ctx, req)
++									Expect(res).To(Equal(reconcile.Result{}))
++									Expect(err).To(MatchError("get not implemented"))
++								})
++							})
++						})
+ 					})
+ 				})
+ 			})
+-- 
+2.48.1
+

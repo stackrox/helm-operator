@@ -1,0 +1,26 @@
+From 1e94c72556c9ad3b50b1a8fe6a4b2b2c35eda89a Mon Sep 17 00:00:00 2001
+From: Moritz Clasmeier <mtesseract@users.noreply.github.com>
+Date: Wed, 8 Jun 2022 09:28:09 +0200
+Subject: [PATCH 09/12] Fix reconciler log format message (#25)
+
+Fix log format string interpolation
+---
+ pkg/reconciler/reconciler.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/pkg/reconciler/reconciler.go b/pkg/reconciler/reconciler.go
+index 8b34f59..338e492 100644
+--- a/pkg/reconciler/reconciler.go
++++ b/pkg/reconciler/reconciler.go
+@@ -641,7 +641,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
+ 	obj.SetGroupVersionKind(*r.gvk)
+ 	err := r.client.Get(ctx, req.NamespacedName, obj)
+ 	if apierrors.IsNotFound(err) {
+-		log.V(1).Info("Resource %s/%s not found, nothing to do", req.NamespacedName.Namespace, req.NamespacedName.Name)
++		log.V(1).Info(fmt.Sprintf("Resource %s/%s not found, nothing to do", req.NamespacedName.Namespace, req.NamespacedName.Name))
+ 		return ctrl.Result{}, nil
+ 	}
+ 	if err != nil {
+-- 
+2.48.1
+
