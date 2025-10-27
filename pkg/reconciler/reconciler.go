@@ -80,6 +80,7 @@ type Reconciler struct {
 	gvk                              *schema.GroupVersionKind
 	chrt                             *chart.Chart
 	selectorPredicate                predicate.Predicate
+	customPredicates                 []predicate.Predicate
 	overrideValues                   map[string]string
 	skipDependentWatches             bool
 	extraWatchSources                []source.Source
@@ -589,6 +590,20 @@ func WithSelector(s metav1.LabelSelector) Option {
 			return err
 		}
 		r.selectorPredicate = p
+		return nil
+	}
+}
+
+// WithPredicate is an Option that adds a custom predicate to filter reconciliation events.
+// Multiple predicates can be added and will be combined using AND logic.
+// This is useful for filtering out unnecessary reconciliations, such as status-only updates.
+//
+// Example:
+//
+//	reconciler.WithPredicate(predicate.GenerationChangedPredicate{})
+func WithPredicate(p predicate.Predicate) Option {
+	return func(r *Reconciler) error {
+		r.customPredicates = append(r.customPredicates, p)
 		return nil
 	}
 }
@@ -1155,10 +1170,11 @@ func (r *Reconciler) setupWatches(mgr ctrl.Manager, c controller.Controller) err
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(*r.gvk)
 
-	var preds []predicate.Predicate
+	preds := make([]predicate.Predicate, 0, len(r.customPredicates)+1)
 	if r.selectorPredicate != nil {
 		preds = append(preds, r.selectorPredicate)
 	}
+	preds = append(preds, r.customPredicates...)
 
 	if err := c.Watch(
 		source.Kind(
