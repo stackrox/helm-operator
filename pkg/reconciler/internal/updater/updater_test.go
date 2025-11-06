@@ -326,3 +326,153 @@ var _ = Describe("statusFor", func() {
 		Expect(statusFor(obj)).To(Equal(&helmAppStatus{}))
 	})
 })
+
+var _ = Describe("tryMergeUpdatedObjectStatus", func() {
+	var (
+		cl                     client.Client
+		u                      Updater
+		obj                    *unstructured.Unstructured
+		current                *unstructured.Unstructured
+		externalCondition      map[string]interface{}
+		externalConditionTypes map[string]struct{}
+		nonExternalCondition   map[string]interface{}
+		nonExternalConditionB  map[string]interface{}
+	)
+
+	BeforeEach(func() {
+		externalCondition = map[string]interface{}{
+			"type":   "ExternalCondition",
+			"status": string(corev1.ConditionTrue),
+			"reason": "ExternallyManaged",
+		}
+		externalConditionTypes = map[string]struct{}{
+			externalCondition["type"].(string): {},
+		}
+		nonExternalCondition = map[string]interface{}{
+			"type":   "Deployed",
+			"status": string(corev1.ConditionTrue),
+			"reason": "InitialDeployment",
+		}
+		nonExternalConditionB = map[string]interface{}{
+			"type":   "Foo",
+			"status": string(corev1.ConditionTrue),
+			"reason": "Success",
+		}
+
+		// Setup obj with initial state (version 100).
+		obj = &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "example.com/v1",
+				"kind":       "TestResource",
+				"metadata": map[string]interface{}{
+					"name":            "test-obj",
+					"namespace":       "default",
+					"resourceVersion": "100",
+				},
+				"status": map[string]interface{}{},
+			},
+		}
+
+		// Setup current with updated state (version 101).
+		current = &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "example.com/v1",
+				"kind":       "TestResource",
+				"metadata": map[string]interface{}{
+					"name":            "test-obj",
+					"namespace":       "default",
+					"resourceVersion": "101",
+				},
+				"status": map[string]interface{}{},
+			},
+		}
+	})
+
+	// When("status empty in both obj and current", func() {
+	// })
+
+	When("only external conditions differ", func() {
+		BeforeEach(func() {
+			obj.Object["status"] = map[string]interface{}{
+				"conditions": []interface{}{nonExternalCondition},
+			}
+			current.Object["status"] = map[string]interface{}{
+				"conditions": []interface{}{nonExternalCondition, externalCondition},
+			}
+
+			cl = fake.NewClientBuilder().WithObjects(current).Build()
+			u = New(cl)
+			u.RegisterExternallyManagedStatusConditions(externalConditionTypes)
+		})
+
+		It("should merge and return resolved", func() {
+			resolved, err := u.tryMergeUpdatedObjectStatus(context.Background(), obj)
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(resolved).To(BeTrue())
+			Expect(obj.GetResourceVersion()).To(Equal("101"))
+
+			// Verify external condition was merged
+			conditions, ok, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
+			Expect(ok).To(BeTrue())
+			Expect(conditions).To(HaveLen(2))
+
+			// Verify ordering (Deployed first, ExternalCondition second from current)
+			Expect(conditions[0].(map[string]interface{})["type"]).To(Equal("Deployed"))
+			Expect(conditions[1].(map[string]interface{})["type"]).To(Equal("ExternalCondition"))
+		})
+	})
+
+	When("non-external condition differs", func() {
+		BeforeEach(func() {
+			obj.Object["status"] = map[string]interface{}{
+				"conditions": []interface{}{nonExternalCondition},
+			}
+			current.Object["status"] = map[string]interface{}{
+				"conditions": []interface{}{nonExternalCondition, nonExternalConditionB},
+			}
+
+			cl = fake.NewClientBuilder().WithObjects(current).Build()
+			u = New(cl)
+			u.RegisterExternallyManagedStatusConditions(externalConditionTypes)
+		})
+
+		It("should not resolve", func() {
+			resolved, err := u.tryMergeUpdatedObjectStatus(context.Background(), obj)
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(resolved).To(BeFalse())
+			Expect(obj.GetResourceVersion()).To(Equal("100"), "resource version should not be updated")
+			Expect(obj.Object["status"].(map[string]interface{})["conditions"]).To(HaveLen(1))
+		})
+	})
+
+	When("no external conditions are configured", func() {
+		BeforeEach(func() {
+			cl = fake.NewClientBuilder().Build()
+			u = New(cl)
+		})
+
+		It("should return early without calling Get", func() {
+			resolved, err := u.tryMergeUpdatedObjectStatus(context.Background(), obj)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(resolved).To(BeFalse())
+		})
+	})
+
+	When("Get returns an error", func() {
+		BeforeEach(func() {
+			// Empty client - Get will return NotFound
+			cl = fake.NewClientBuilder().Build()
+			u = New(cl)
+			u.RegisterExternallyManagedStatusConditions(externalConditionTypes)
+		})
+
+		It("should return the error", func() {
+			resolved, err := u.tryMergeUpdatedObjectStatus(context.Background(), obj)
+			Expect(err).To(HaveOccurred())
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
+			Expect(resolved).To(BeFalse())
+		})
+	})
+})
