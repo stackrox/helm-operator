@@ -99,6 +99,8 @@ type Reconciler struct {
 	upgradeAnnotations       map[string]annotation.Upgrade
 	uninstallAnnotations     map[string]annotation.Uninstall
 	pauseReconcileAnnotation string
+
+	externallyManagedStatusConditions map[string]struct{}
 }
 
 // New creates a new Reconciler that reconciles custom resources that define a
@@ -602,6 +604,18 @@ func WithControllerSetupFunc(f ControllerSetupFunc) Option {
 	}
 }
 
+func WithExternallyManagedStatusConditions(conditions []string) Option {
+	return func(r *Reconciler) error {
+		for _, c := range conditions {
+			if r.externallyManagedStatusConditions == nil {
+				r.externallyManagedStatusConditions = make(map[string]struct{})
+			}
+			r.externallyManagedStatusConditions[c] = struct{}{}
+		}
+		return nil
+	}
+}
+
 // ControllerSetup allows restricted access to the Controller using the WithControllerSetupFunc option.
 // Currently, the only supposed configuration is adding additional watchers do the controller.
 type ControllerSetup interface {
@@ -674,6 +688,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 	}
 
 	u := updater.New(r.client)
+	u.RegisterExternallyManagedStatusConditions(r.externallyManagedStatusConditions)
 	defer func() {
 		applyErr := u.Apply(ctx, obj)
 		if err == nil && !apierrors.IsNotFound(applyErr) {

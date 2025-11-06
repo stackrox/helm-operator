@@ -18,6 +18,8 @@ package updater
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 
 	"helm.sh/helm/v3/pkg/release"
 	corev1 "k8s.io/api/core/v1"
@@ -40,10 +42,20 @@ func New(client client.Client) Updater {
 }
 
 type Updater struct {
-	isCanceled        bool
-	client            client.Client
-	updateFuncs       []UpdateFunc
-	updateStatusFuncs []UpdateStatusFunc
+	isCanceled                        bool
+	client                            client.Client
+	updateFuncs                       []UpdateFunc
+	updateStatusFuncs                 []UpdateStatusFunc
+	externallyManagedStatusConditions map[string]struct{}
+}
+
+func (u *Updater) RegisterExternallyManagedStatusConditions(conditions map[string]struct{}) {
+	if u.externallyManagedStatusConditions == nil {
+		u.externallyManagedStatusConditions = make(map[string]struct{})
+	}
+	for conditionType := range conditions {
+		u.externallyManagedStatusConditions[conditionType] = struct{}{}
+	}
 }
 
 type UpdateFunc func(*unstructured.Unstructured) bool
@@ -113,7 +125,18 @@ func (u *Updater) Apply(ctx context.Context, obj *unstructured.Unstructured) err
 		st.updateStatusObject()
 		obj.Object["status"] = st.StatusObject
 		if err := retryOnRetryableUpdateError(backoff, func() error {
-			return u.client.Status().Update(ctx, obj)
+			updateErr := u.client.Status().Update(ctx, obj)
+			if errors.IsConflict(updateErr) {
+				resolved, resolveErr := u.tryMergeUpdatedObjectStatus(ctx, obj)
+				if resolveErr != nil {
+					return resolveErr
+				}
+				if !resolved {
+					return updateErr
+				}
+				return fmt.Errorf("Status Update conflict due to externally-managed status conditions") // retriable error.
+			}
+			return updateErr
 		}); err != nil {
 			return err
 		}
@@ -125,12 +148,141 @@ func (u *Updater) Apply(ctx context.Context, obj *unstructured.Unstructured) err
 	}
 	if needsUpdate {
 		if err := retryOnRetryableUpdateError(backoff, func() error {
-			return u.client.Update(ctx, obj)
+			updateErr := u.client.Update(ctx, obj)
+			if errors.IsConflict(updateErr) {
+				resolved, resolveErr := u.tryMergeUpdatedObjectStatus(ctx, obj)
+				if resolveErr != nil {
+					return resolveErr
+				}
+				if !resolved {
+					return updateErr
+				}
+				return fmt.Errorf("Update conflict due to externally-managed status conditions") // retriable error.
+			}
+			return updateErr
 		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// This function tries to merge the status of obj with the current version of the status on the cluster.
+// The unstructured obj is expected to have been modified and to have caused a conflict error during an update attempt.
+// If the only differences between obj and the current version are in externally managed status conditions,
+// those conditions are merged from the current version into obj.
+// Returns true if updating shall be retried with the updated obj.
+// Returns false if the conflict could not be resolved.
+func (u *Updater) tryMergeUpdatedObjectStatus(ctx context.Context, obj *unstructured.Unstructured) (bool, error) {
+	if len(u.externallyManagedStatusConditions) == 0 {
+		// Nothing we can do about it.
+		return false, nil
+	}
+
+	// Retrieve current version from the cluster.
+	current := &unstructured.Unstructured{}
+	current.SetGroupVersionKind(obj.GroupVersionKind())
+	if err := u.client.Get(ctx, client.ObjectKeyFromObject(obj), current); err != nil {
+		return false, err
+	}
+
+	// Update obj with externally managed conditions from current.
+	objCopy := obj.DeepCopy()
+	objCopy.SetResourceVersion(current.GetResourceVersion())
+	u.updateExternallyManagedConditions(objCopy, current)
+
+	// Now compare obj (with merged external conditions) to current.
+	// If they match (except resource version), the only diff was in external conditions.
+	if !reflect.DeepEqual(objCopy.Object, current.Object) {
+		return false, nil
+	}
+
+	// We were able to resolve the conflict by merging external conditions.
+	obj.Object = objCopy.Object
+	return true, nil
+}
+
+// updateExternallyManagedConditions updates obj's status conditions by replacing
+// externally managed conditions with their values from current.
+// Uses current's ordering to avoid false positives in conflict detection.
+func (u *Updater) updateExternallyManagedConditions(obj, current *unstructured.Unstructured) {
+	objConditions := statusConditionsFromObject(obj)
+	if objConditions == nil {
+		return
+	}
+
+	currentConditions := statusConditionsFromObject(current)
+	if currentConditions == nil {
+		return
+	}
+
+	// Build a map of all conditions from obj (by type).
+	objConditionsByType := make(map[string]map[string]interface{})
+	for _, cond := range objConditions {
+		if condType, ok := cond["type"].(string); ok {
+			objConditionsByType[condType] = cond
+		}
+	}
+
+	// Build merged conditions starting from current's ordering.
+	mergedConditions := make([]map[string]interface{}, 0, len(currentConditions))
+	for _, cond := range currentConditions {
+		condType, ok := cond["type"].(string)
+		if !ok {
+			// Shouldn't happen.
+			continue
+		}
+		if _, isExternal := u.externallyManagedStatusConditions[condType]; isExternal {
+			// Keep external condition from current.
+			mergedConditions = append(mergedConditions, cond)
+		} else if objCond, found := objConditionsByType[condType]; found {
+			// Replace with non-external condition from obj.
+			mergedConditions = append(mergedConditions, objCond)
+			delete(objConditionsByType, condType) // Mark as used.
+		}
+		// Note: If condition exists in current but not in obj (and is non-external),
+		// we skip it.
+	}
+
+	// Add any remaining non-externally managed conditions from obj that weren't in current.
+	for condType, cond := range objConditionsByType {
+		if _, isExternal := u.externallyManagedStatusConditions[condType]; isExternal {
+			continue
+		}
+		mergedConditions = append(mergedConditions, cond)
+	}
+
+	// Convert to []interface{} for SetNestedField
+	mergedConditionsInterface := make([]interface{}, len(mergedConditions))
+	for i, cond := range mergedConditions {
+		mergedConditionsInterface[i] = cond
+	}
+
+	// Write the modified conditions back.
+	_ = unstructured.SetNestedField(obj.Object, mergedConditionsInterface, "status", "conditions")
+}
+
+// statusConditionsFromObject extracts status conditions from an unstructured object.
+// Returns nil if the conditions field is not found or is not the expected type.
+func statusConditionsFromObject(obj *unstructured.Unstructured) []map[string]interface{} {
+	conditionsRaw, ok, _ := unstructured.NestedFieldNoCopy(obj.Object, "status", "conditions")
+	if !ok {
+		return nil
+	}
+
+	conditionsSlice, ok := conditionsRaw.([]interface{})
+	if !ok {
+		return nil
+	}
+
+	// Convert []interface{} to []map[string]interface{}
+	result := make([]map[string]interface{}, 0, len(conditionsSlice))
+	for _, cond := range conditionsSlice {
+		if condMap, ok := cond.(map[string]interface{}); ok {
+			result = append(result, condMap)
+		}
+	}
+	return result
 }
 
 func RemoveFinalizer(finalizer string) UpdateFunc {
