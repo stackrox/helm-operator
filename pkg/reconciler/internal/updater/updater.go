@@ -18,7 +18,10 @@ package updater
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 
+	"github.com/go-logr/logr"
 	"helm.sh/helm/v3/pkg/release"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -33,17 +36,35 @@ import (
 	"github.com/operator-framework/helm-operator-plugins/pkg/internal/status"
 )
 
-func New(client client.Client) Updater {
+func New(client client.Client, logger logr.Logger) Updater {
+	logger = logger.WithName("updater")
 	return Updater{
 		client: client,
+		logger: logger,
 	}
 }
 
 type Updater struct {
-	isCanceled        bool
-	client            client.Client
-	updateFuncs       []UpdateFunc
-	updateStatusFuncs []UpdateStatusFunc
+	isCanceled                         bool
+	client                             client.Client
+	logger                             logr.Logger
+	updateFuncs                        []UpdateFunc
+	updateStatusFuncs                  []UpdateStatusFunc
+	externallyManagedStatusConditions  map[string]struct{}
+	enableAggressiveConflictResolution bool
+}
+
+func (u *Updater) RegisterExternallyManagedStatusConditions(conditions map[string]struct{}) {
+	if u.externallyManagedStatusConditions == nil {
+		u.externallyManagedStatusConditions = make(map[string]struct{}, len(conditions))
+	}
+	for conditionType := range conditions {
+		u.externallyManagedStatusConditions[conditionType] = struct{}{}
+	}
+}
+
+func (u *Updater) EnableAggressiveConflictResolution() {
+	u.enableAggressiveConflictResolution = true
 }
 
 type UpdateFunc func(*unstructured.Unstructured) bool
@@ -113,7 +134,20 @@ func (u *Updater) Apply(ctx context.Context, obj *unstructured.Unstructured) err
 		st.updateStatusObject()
 		obj.Object["status"] = st.StatusObject
 		if err := retryOnRetryableUpdateError(backoff, func() error {
-			return u.client.Status().Update(ctx, obj)
+			updateErr := u.client.Status().Update(ctx, obj)
+			if errors.IsConflict(updateErr) && u.enableAggressiveConflictResolution {
+				u.logger.V(1).Info("Status update conflict detected")
+				resolved, resolveErr := u.tryRefreshObject(ctx, obj)
+				u.logger.V(1).Info("tryRefreshObject", "resolved", resolved, "resolveErr", resolveErr)
+				if resolveErr != nil {
+					return resolveErr
+				}
+				if !resolved {
+					return updateErr
+				}
+				return fmt.Errorf("status update conflict due to externally-managed status conditions") // retriable error.
+			}
+			return updateErr
 		}); err != nil {
 			return err
 		}
@@ -125,12 +159,147 @@ func (u *Updater) Apply(ctx context.Context, obj *unstructured.Unstructured) err
 	}
 	if needsUpdate {
 		if err := retryOnRetryableUpdateError(backoff, func() error {
-			return u.client.Update(ctx, obj)
+			updateErr := u.client.Update(ctx, obj)
+			if errors.IsConflict(updateErr) && u.enableAggressiveConflictResolution {
+				u.logger.V(1).Info("Status update conflict detected")
+				resolved, resolveErr := u.tryRefreshObject(ctx, obj)
+				u.logger.V(1).Info("tryRefreshObject", "resolved", resolved, "resolveErr", resolveErr)
+				if resolveErr != nil {
+					return resolveErr
+				}
+				if !resolved {
+					return updateErr
+				}
+				return fmt.Errorf("update conflict due to externally-managed status conditions") // retriable error.
+			}
+			return updateErr
 		}); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// This function tries to merge the status of obj with the current version of the status on the cluster.
+// The unstructured obj is expected to have been modified and to have caused a conflict error during an update attempt.
+// If the only differences between obj and the current version are in externally managed status conditions,
+// those conditions are merged from the current version into obj.
+// Returns true if updating shall be retried with the updated obj.
+// Returns false if the conflict could not be resolved.
+func (u *Updater) tryRefreshObject(ctx context.Context, obj *unstructured.Unstructured) (bool, error) {
+	// Retrieve current version from the cluster.
+	current := &unstructured.Unstructured{}
+	current.SetGroupVersionKind(obj.GroupVersionKind())
+	objectKey := client.ObjectKeyFromObject(obj)
+	if err := u.client.Get(ctx, objectKey, current); err != nil {
+		err = fmt.Errorf("refreshing object %s/%s: %w", objectKey.Namespace, objectKey.Name, err)
+		return false, err
+	}
+
+	if !reflect.DeepEqual(obj.Object["spec"], current.Object["spec"]) {
+		// Diff in object spec. Nothing we can do about it -> Fail.
+		u.logger.V(1).Info("Cluster resource cannot be updated due to spec mismatch",
+			"namespace", objectKey.Namespace, "name", objectKey.Name, "gkv", obj.GroupVersionKind(),
+		)
+		return false, nil
+	}
+
+	// Merge externally managed conditions from current into object copy.
+	objCopy := obj.DeepCopy()
+	u.mergeExternallyManagedConditions(objCopy, current)
+
+	// Overwrite metadata with the most recent in-cluster version.
+	// This ensures we have the latest resourceVersion, annotations, labels, etc.
+	objCopy.Object["metadata"] = current.Object["metadata"]
+
+	// We were able to resolve the conflict by merging external conditions.
+	obj.Object = objCopy.Object
+
+	u.logger.V(1).Info("Resolved update conflict by merging externally-managed status conditions")
+	return true, nil
+}
+
+// mergeExternallyManagedConditions updates obj's status conditions by replacing
+// externally managed conditions with their values from current.
+// Uses current's ordering to avoid false positives in conflict detection.
+func (u *Updater) mergeExternallyManagedConditions(obj, current *unstructured.Unstructured) {
+	objConditions := statusConditionsFromObject(obj)
+	if objConditions == nil {
+		return
+	}
+
+	currentConditions := statusConditionsFromObject(current)
+	if currentConditions == nil {
+		return
+	}
+
+	// Build a map of all conditions from obj (by type).
+	objConditionsByType := make(map[string]map[string]interface{})
+	for _, cond := range objConditions {
+		if condType, ok := cond["type"].(string); ok {
+			objConditionsByType[condType] = cond
+		}
+	}
+
+	// Build merged conditions starting from current's ordering.
+	mergedConditions := make([]map[string]interface{}, 0, len(currentConditions))
+	for _, cond := range currentConditions {
+		condType, ok := cond["type"].(string)
+		if !ok {
+			// Shouldn't happen.
+			continue
+		}
+		if _, isExternal := u.externallyManagedStatusConditions[condType]; isExternal {
+			// Keep external condition from current.
+			mergedConditions = append(mergedConditions, cond)
+		} else if objCond, found := objConditionsByType[condType]; found {
+			// Replace with non-external condition from obj.
+			mergedConditions = append(mergedConditions, objCond)
+			delete(objConditionsByType, condType) // Mark as used.
+		}
+		// Note: If condition exists in current but not in obj (and is non-external),
+		// we skip it.
+	}
+
+	// Add any remaining non-externally managed conditions from obj that weren't in current.
+	for condType, cond := range objConditionsByType {
+		if _, isExternal := u.externallyManagedStatusConditions[condType]; isExternal {
+			continue
+		}
+		mergedConditions = append(mergedConditions, cond)
+	}
+
+	// Convert to []interface{} for SetNestedField
+	mergedConditionsInterface := make([]interface{}, len(mergedConditions))
+	for i, cond := range mergedConditions {
+		mergedConditionsInterface[i] = cond
+	}
+
+	// Write the modified conditions back.
+	_ = unstructured.SetNestedField(obj.Object, mergedConditionsInterface, "status", "conditions")
+}
+
+// statusConditionsFromObject extracts status conditions from an unstructured object.
+// Returns nil if the conditions field is not found or is not the expected type.
+func statusConditionsFromObject(obj *unstructured.Unstructured) []map[string]interface{} {
+	conditionsRaw, ok, _ := unstructured.NestedFieldNoCopy(obj.Object, "status", "conditions")
+	if !ok {
+		return nil
+	}
+
+	conditionsSlice, ok := conditionsRaw.([]interface{})
+	if !ok {
+		return nil
+	}
+
+	// Convert []interface{} to []map[string]interface{}
+	result := make([]map[string]interface{}, 0, len(conditionsSlice))
+	for _, cond := range conditionsSlice {
+		if condMap, ok := cond.(map[string]interface{}); ok {
+			result = append(result, condMap)
+		}
+	}
+	return result
 }
 
 func RemoveFinalizer(finalizer string) UpdateFunc {

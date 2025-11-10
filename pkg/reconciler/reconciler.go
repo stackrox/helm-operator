@@ -100,6 +100,9 @@ type Reconciler struct {
 	upgradeAnnotations       map[string]annotation.Upgrade
 	uninstallAnnotations     map[string]annotation.Uninstall
 	pauseReconcileAnnotation string
+
+	externallyManagedStatusConditions  map[string]struct{}
+	enableAggressiveConflictResolution bool
 }
 
 // New creates a new Reconciler that reconciles custom resources that define a
@@ -617,6 +620,25 @@ func WithControllerSetupFunc(f ControllerSetupFunc) Option {
 	}
 }
 
+func WithExternallyManagedStatusConditions(conditions ...string) Option {
+	return func(r *Reconciler) error {
+		if r.externallyManagedStatusConditions == nil {
+			r.externallyManagedStatusConditions = make(map[string]struct{}, len(conditions))
+		}
+		for _, c := range conditions {
+			r.externallyManagedStatusConditions[c] = struct{}{}
+		}
+		return nil
+	}
+}
+
+func WithAggressiveConflictResolution(enabled bool) Option {
+	return func(r *Reconciler) error {
+		r.enableAggressiveConflictResolution = enabled
+		return nil
+	}
+}
+
 // ControllerSetup allows restricted access to the Controller using the WithControllerSetupFunc option.
 // Currently, the only supposed configuration is adding additional watchers do the controller.
 type ControllerSetup interface {
@@ -656,7 +678,7 @@ type ControllerSetupFunc func(c ControllerSetup) error
 //   - Deployed - a release for this CR is deployed (but not necessarily ready).
 //   - ReleaseFailed - an installation or upgrade failed.
 //   - Irreconcilable - an error occurred during reconciliation
-func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Result, err error) {
+func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
 	log := r.log.WithValues(strings.ToLower(r.gvk.Kind), req.NamespacedName)
 	log.V(1).Info("Reconciliation triggered")
 
@@ -682,17 +704,26 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 	// This is a safety measure to ensure that the chart is fully uninstalled before the CR is deleted.
 	if obj.GetDeletionTimestamp() == nil && !controllerutil.ContainsFinalizer(obj, uninstallFinalizer) {
 		log.V(1).Info("Adding uninstall finalizer.")
+		patch := client.MergeFrom(obj.DeepCopy())
 		obj.SetFinalizers(append(obj.GetFinalizers(), uninstallFinalizer))
-		if err := r.client.Update(ctx, obj); err != nil {
+		if err := r.client.Patch(ctx, obj, patch); err != nil {
 			return ctrl.Result{}, errs.Wrapf(err, "failed to add uninstall finalizer to %s/%s", req.NamespacedName.Namespace, req.NamespacedName.Name)
 		}
 	}
 
-	u := updater.New(r.client)
+	u := updater.New(r.client, log)
+	u.RegisterExternallyManagedStatusConditions(r.externallyManagedStatusConditions)
+	if r.enableAggressiveConflictResolution {
+		u.EnableAggressiveConflictResolution()
+	}
 	defer func() {
 		applyErr := u.Apply(ctx, obj)
 		if err == nil && !apierrors.IsNotFound(applyErr) {
 			err = applyErr
+		}
+		if err != nil {
+			// Otherwise controller-runtime will log a warning.
+			result = ctrl.Result{}
 		}
 	}()
 
@@ -876,7 +907,11 @@ func (r *Reconciler) handleDeletion(ctx context.Context, actionClient helmclient
 		// and we need to be able to update the conditions on the CR to
 		// indicate that the uninstall failed.
 		if err := func() (err error) {
-			uninstallUpdater := updater.New(r.client)
+			uninstallUpdater := updater.New(r.client, log)
+			uninstallUpdater.RegisterExternallyManagedStatusConditions(r.externallyManagedStatusConditions)
+			if r.enableAggressiveConflictResolution {
+				uninstallUpdater.EnableAggressiveConflictResolution()
+			}
 			defer func() {
 				applyErr := uninstallUpdater.Apply(ctx, obj)
 				if err == nil {
