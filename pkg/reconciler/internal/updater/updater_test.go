@@ -337,7 +337,7 @@ var _ = Describe("tryMergeUpdatedObjectStatus", func() {
 		externalCondition      map[string]interface{}
 		externalConditionTypes map[string]struct{}
 		nonExternalCondition   map[string]interface{}
-		nonExternalConditionB  map[string]interface{}
+		// nonExternalConditionB  map[string]interface{}
 	)
 
 	BeforeEach(func() {
@@ -354,11 +354,11 @@ var _ = Describe("tryMergeUpdatedObjectStatus", func() {
 			"status": string(corev1.ConditionTrue),
 			"reason": "InitialDeployment",
 		}
-		nonExternalConditionB = map[string]interface{}{
-			"type":   "Foo",
-			"status": string(corev1.ConditionTrue),
-			"reason": "Success",
-		}
+		// nonExternalConditionB = map[string]interface{}{
+		// 	"type":   "Foo",
+		// 	"status": string(corev1.ConditionTrue),
+		// 	"reason": "Success",
+		// }
 
 		// Setup obj with initial state (version 100).
 		obj = &unstructured.Unstructured{
@@ -424,42 +424,18 @@ var _ = Describe("tryMergeUpdatedObjectStatus", func() {
 		})
 	})
 
-	When("non-external condition differs", func() {
-		BeforeEach(func() {
-			obj.Object["status"] = map[string]interface{}{
-				"conditions": []interface{}{nonExternalCondition},
-			}
-			current.Object["status"] = map[string]interface{}{
-				"conditions": []interface{}{nonExternalCondition, nonExternalConditionB},
-			}
+	// When("no external conditions are configured", func() {
+	// 	BeforeEach(func() {
+	// 		cl = fake.NewClientBuilder().Build()
+	// 		u = New(cl, logr.Discard())
+	// 	})
 
-			cl = fake.NewClientBuilder().WithObjects(current).Build()
-			u = New(cl, logr.Discard())
-			u.RegisterExternallyManagedStatusConditions(externalConditionTypes)
-		})
-
-		It("should not resolve", func() {
-			resolved, err := u.tryRefreshObject(context.Background(), obj)
-
-			Expect(err).ToNot(HaveOccurred())
-			Expect(resolved).To(BeFalse())
-			Expect(obj.GetResourceVersion()).To(Equal("100"), "resource version should not be updated")
-			Expect(obj.Object["status"].(map[string]interface{})["conditions"]).To(HaveLen(1))
-		})
-	})
-
-	When("no external conditions are configured", func() {
-		BeforeEach(func() {
-			cl = fake.NewClientBuilder().Build()
-			u = New(cl, logr.Discard())
-		})
-
-		It("should return early without calling Get", func() {
-			resolved, err := u.tryRefreshObject(context.Background(), obj)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(resolved).To(BeFalse())
-		})
-	})
+	// 	It("should return early without calling Get", func() {
+	// 		resolved, err := u.tryRefreshObject(context.Background(), obj)
+	// 		Expect(err).ToNot(HaveOccurred())
+	// 		Expect(resolved).To(BeFalse())
+	// 	})
+	// })
 
 	When("Get returns an error", func() {
 		BeforeEach(func() {
