@@ -210,7 +210,16 @@ func (u *Updater) tryRefreshObject(ctx context.Context, obj *unstructured.Unstru
 
 	// Overwrite metadata with the most recent in-cluster version.
 	// This ensures we have the latest resourceVersion, annotations, labels, etc.
-	objCopy.Object["metadata"] = current.Object["metadata"]
+	// The reconciler flow can modify the set of finalizers, hence we need to preserve them.
+	newMetadata, metadataFound, _ := unstructured.NestedFieldNoCopy(current.Object, "metadata")
+	if !metadataFound {
+		return false, fmt.Errorf("failed to obtain metadata from current object")
+	}
+	finalizers, finalizersFound, _ := unstructured.NestedFieldNoCopy(obj.Object, "metadata", "finalizers")
+	if finalizersFound {
+		unstructured.SetNestedField(newMetadata.(map[string]interface{}), finalizers, "finalizers")
+	}
+	objCopy.Object["metadata"] = newMetadata
 
 	// We were able to resolve the conflict by merging external conditions.
 	obj.Object = objCopy.Object
