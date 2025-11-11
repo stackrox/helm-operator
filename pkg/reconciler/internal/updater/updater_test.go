@@ -328,7 +328,7 @@ var _ = Describe("statusFor", func() {
 	})
 })
 
-var _ = Describe("tryMergeUpdatedObjectStatus", func() {
+var _ = Describe("tryRefreshObject", func() {
 	var (
 		cl                     client.Client
 		u                      Updater
@@ -389,8 +389,26 @@ var _ = Describe("tryMergeUpdatedObjectStatus", func() {
 		}
 	})
 
-	// When("status empty in both obj and current", func() {
-	// })
+	When("finalizers are updated in the reconciler flow", func() {
+		BeforeEach(func() {
+			unstructured.SetNestedStringSlice(obj.Object, []string{"finalizerA, finalizerB"}, "metadata", "finalizers")
+			unstructured.SetNestedStringSlice(current.Object, []string{"finalizerA, finalizerC"}, "metadata", "finalizers")
+
+			cl = fake.NewClientBuilder().WithObjects(current).Build()
+			u = New(cl, logr.Discard())
+		})
+
+		It("should preserve these changes", func() {
+			resolved, err := u.tryRefreshObject(context.Background(), obj)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(resolved).To(BeTrue())
+			Expect(obj.GetResourceVersion()).To(Equal("101"))
+
+			// Verify finalizers were merged
+			finalizers := obj.GetFinalizers()
+			Expect(finalizers).To(Equal([]string{"finalizerA, finalizerB"}))
+		})
+	})
 
 	When("only external conditions differ", func() {
 		BeforeEach(func() {
