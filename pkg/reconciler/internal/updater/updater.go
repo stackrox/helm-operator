@@ -217,7 +217,10 @@ func (u *Updater) tryRefreshObject(ctx context.Context, obj *unstructured.Unstru
 	}
 	finalizers, finalizersFound, _ := unstructured.NestedFieldNoCopy(obj.Object, "metadata", "finalizers")
 	if finalizersFound {
-		unstructured.SetNestedField(newMetadata.(map[string]interface{}), finalizers, "finalizers")
+		err := unstructured.SetNestedField(newMetadata.(map[string]interface{}), finalizers, "finalizers")
+		if err != nil {
+			return false, fmt.Errorf("failed to set finalizers in merged metadata: %w", err)
+		}
 	}
 	objCopy.Object["metadata"] = newMetadata
 

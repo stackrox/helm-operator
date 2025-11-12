@@ -391,8 +391,10 @@ var _ = Describe("tryRefreshObject", func() {
 
 	When("finalizers are updated in the reconciler flow", func() {
 		BeforeEach(func() {
-			unstructured.SetNestedStringSlice(obj.Object, []string{"finalizerA, finalizerB"}, "metadata", "finalizers")
-			unstructured.SetNestedStringSlice(current.Object, []string{"finalizerA, finalizerC"}, "metadata", "finalizers")
+			err := unstructured.SetNestedStringSlice(obj.Object, []string{"finalizerA, finalizerB"}, "metadata", "finalizers")
+			Expect(err).ToNot(HaveOccurred())
+			err = unstructured.SetNestedStringSlice(current.Object, []string{"finalizerA, finalizerC"}, "metadata", "finalizers")
+			Expect(err).ToNot(HaveOccurred())
 
 			cl = fake.NewClientBuilder().WithObjects(current).Build()
 			u = New(cl, logr.Discard())
