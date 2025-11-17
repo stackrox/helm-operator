@@ -698,7 +698,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 		}
 	}
 
-	u := updater.New(r.client)
+	u := updater.New(r.client, log)
+	if r.enableAggressiveConflictResolution {
+		u.EnableAggressiveConflictResolution()
+	}
 	defer func() {
 		applyErr := u.Apply(ctx, obj)
 		if err == nil && !apierrors.IsNotFound(applyErr) {
@@ -886,7 +889,10 @@ func (r *Reconciler) handleDeletion(ctx context.Context, actionClient helmclient
 		// and we need to be able to update the conditions on the CR to
 		// indicate that the uninstall failed.
 		if err := func() (err error) {
-			uninstallUpdater := updater.New(r.client)
+			uninstallUpdater := updater.New(r.client, log)
+			if r.enableAggressiveConflictResolution {
+				uninstallUpdater.EnableAggressiveConflictResolution()
+			}
 			defer func() {
 				applyErr := uninstallUpdater.Apply(ctx, obj)
 				if err == nil {
