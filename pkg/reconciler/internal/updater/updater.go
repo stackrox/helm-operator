@@ -48,6 +48,12 @@ type Updater struct {
 	logger            logr.Logger
 	updateFuncs       []UpdateFunc
 	updateStatusFuncs []UpdateStatusFunc
+
+	enableAggressiveConflictResolution bool
+}
+
+func (u *Updater) EnableAggressiveConflictResolution() {
+	u.enableAggressiveConflictResolution = true
 }
 
 type UpdateFunc func(*unstructured.Unstructured) bool
