@@ -19,6 +19,7 @@ package updater
 import (
 	"context"
 
+	"github.com/go-logr/logr"
 	"helm.sh/helm/v3/pkg/release"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -33,15 +34,18 @@ import (
 	"github.com/operator-framework/helm-operator-plugins/pkg/internal/status"
 )
 
-func New(client client.Client) Updater {
+func New(client client.Client, logger logr.Logger) Updater {
+	logger = logger.WithName("updater")
 	return Updater{
 		client: client,
+		logger: logger,
 	}
 }
 
 type Updater struct {
 	isCanceled        bool
 	client            client.Client
+	logger            logr.Logger
 	updateFuncs       []UpdateFunc
 	updateStatusFuncs []UpdateStatusFunc
 }
