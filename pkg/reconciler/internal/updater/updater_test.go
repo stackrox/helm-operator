@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -31,7 +32,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	pkgStatus "github.com/operator-framework/helm-operator-plugins/pkg/internal/status"
 	"github.com/operator-framework/helm-operator-plugins/pkg/reconciler/internal/conditions"
 )
 
@@ -39,6 +42,10 @@ const (
 	testFinalizer           = "testFinalizer"
 	availableReplicasStatus = int64(3)
 	replicasStatus          = int64(5)
+)
+
+var (
+	transientError = errors.New("transient error")
 )
 
 var _ = Describe("Updater", func() {
@@ -51,7 +58,7 @@ var _ = Describe("Updater", func() {
 
 	JustBeforeEach(func() {
 		cl = fake.NewClientBuilder().WithInterceptorFuncs(interceptorFuncs).Build()
-		u = New(cl)
+		u = New(cl, logr.Discard())
 		obj = &unstructured.Unstructured{Object: map[string]interface{}{
 			"apiVersion": "apps/v1",
 			"kind":       "Deployment",
@@ -85,7 +92,7 @@ var _ = Describe("Updater", func() {
 			interceptorFuncs.SubResourceUpdate = func(ctx context.Context, interceptorClient client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 				updateCallCount++
 				if updateCallCount == 1 {
-					return errors.New("transient error")
+					return transientError
 				}
 				return interceptorClient.SubResource(subResourceName).Update(ctx, obj, opts...)
 			}
@@ -177,8 +184,84 @@ var _ = Describe("Updater", func() {
 			Expect(found).To(BeTrue())
 			Expect(err).To(Succeed())
 		})
+
+		It("should add a finalizer", func() {
+			u.Update(func(u *unstructured.Unstructured) bool {
+				return controllerutil.AddFinalizer(u, testFinalizer)
+			})
+			Expect(u.Apply(context.TODO(), obj)).To(Succeed())
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
+			Expect(obj.GetFinalizers()).To(ContainElement(testFinalizer))
+		})
+
+		It("should remove a finalizer", func() {
+			obj.SetFinalizers([]string{testFinalizer})
+			Expect(cl.Update(context.TODO(), obj)).To(Succeed())
+
+			u.Update(func(u *unstructured.Unstructured) bool {
+				return controllerutil.RemoveFinalizer(u, testFinalizer)
+			})
+			Expect(u.Apply(context.TODO(), obj)).To(Succeed())
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
+			Expect(obj.GetFinalizers()).ToNot(ContainElement(testFinalizer))
+		})
+
+		It("should preserve unknown status conditions", func() {
+			// Add external status condition on cluster.
+			clusterObj := obj.DeepCopy()
+			unknownCondition := map[string]interface{}{
+				"type":   "UnknownCondition",
+				"status": string(corev1.ConditionTrue),
+				"reason": "ExternallyManaged",
+			}
+			Expect(unstructured.SetNestedSlice(clusterObj.Object, []interface{}{unknownCondition}, "status", "conditions")).To(Succeed())
+			Expect(retryOnTransientError(func() error {
+				return cl.Status().Update(context.TODO(), clusterObj)
+			})).ToNot(HaveOccurred())
+			// Add status condition using updater.
+			u.UpdateStatus(EnsureCondition(conditions.Deployed(corev1.ConditionTrue, "", "")))
+			u.EnableAggressiveConflictResolution()
+			Expect(u.Apply(context.TODO(), obj)).To(Succeed())
+			// Retrieve object from cluster and extract status conditions.
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
+			objConditionsSlice, _, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
+			Expect(err).ToNot(HaveOccurred())
+			objConditions, err := pkgStatus.FromUnstructured(objConditionsSlice)
+			Expect(err).ToNot(HaveOccurred())
+			// Verify both status conditions are present.
+			Expect(objConditions.IsTrueFor(pkgStatus.ConditionType("UnknownCondition"))).To(BeTrue())
+			Expect(objConditions.IsTrueFor(pkgStatus.ConditionType("Deployed"))).To(BeTrue())
+		})
+
+		It("should fail on conflict without aggressive resolution", func() {
+			// Add external status condition on cluster.
+			clusterObj := obj.DeepCopy()
+			unknownCondition := map[string]interface{}{
+				"type":   "UnknownCondition",
+				"status": string(corev1.ConditionTrue),
+				"reason": "ExternallyManaged",
+			}
+			Expect(unstructured.SetNestedSlice(clusterObj.Object, []interface{}{unknownCondition}, "status", "conditions")).To(Succeed())
+			Expect(retryOnTransientError(func() error {
+				return cl.Status().Update(context.TODO(), clusterObj)
+			})).ToNot(HaveOccurred())
+			Expect(cl.Status().Update(context.TODO(), clusterObj)).To(Succeed())
+			// Add status condition using updater.
+			u.UpdateStatus(EnsureCondition(conditions.Deployed(corev1.ConditionTrue, "", "")))
+			err := u.Apply(context.TODO(), obj)
+			// Verify conflict error is returned.
+			Expect(apierrors.IsConflict(err)).To(BeTrue())
+		})
 	})
 })
+
+func retryOnTransientError(f func() error) error {
+	err := f()
+	if errors.Is(err, transientError) {
+		err = f()
+	}
+	return err
+}
 
 var _ = Describe("RemoveFinalizer", func() {
 	var obj *unstructured.Unstructured
@@ -324,5 +407,20 @@ var _ = Describe("statusFor", func() {
 
 		obj.Object["status"] = "hello"
 		Expect(statusFor(obj)).To(Equal(&helmAppStatus{}))
+	})
+
+	It("should handle unknown status conditions", func() {
+		uSt := map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{
+					"type":   "UnknownCondition",
+					"status": string(corev1.ConditionTrue),
+				},
+			},
+		}
+		obj.Object["status"] = uSt
+		status := statusFor(obj)
+		Expect(status).ToNot(BeNil())
+		Expect(status.Conditions.IsTrueFor(pkgStatus.ConditionType("UnknownCondition"))).To(BeTrue())
 	})
 })
