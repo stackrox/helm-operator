@@ -45,7 +45,7 @@ const (
 )
 
 var (
-	transientError = errors.New("transient error")
+	errTransient = errors.New("transient error")
 )
 
 var _ = Describe("Updater", func() {
@@ -92,7 +92,7 @@ var _ = Describe("Updater", func() {
 			interceptorFuncs.SubResourceUpdate = func(ctx context.Context, interceptorClient client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
 				updateCallCount++
 				if updateCallCount == 1 {
-					return transientError
+					return errTransient
 				}
 				return interceptorClient.SubResource(subResourceName).Update(ctx, obj, opts...)
 			}
@@ -257,7 +257,7 @@ var _ = Describe("Updater", func() {
 
 func retryOnTransientError(f func() error) error {
 	err := f()
-	if errors.Is(err, transientError) {
+	if errors.Is(err, errTransient) {
 		err = f()
 	}
 	return err
