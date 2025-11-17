@@ -100,6 +100,8 @@ type Reconciler struct {
 	upgradeAnnotations       map[string]annotation.Upgrade
 	uninstallAnnotations     map[string]annotation.Uninstall
 	pauseReconcileAnnotation string
+
+	enableAggressiveConflictResolution bool
 }
 
 // New creates a new Reconciler that reconciles custom resources that define a
@@ -613,6 +615,13 @@ func WithPredicate(p predicate.Predicate) Option {
 func WithControllerSetupFunc(f ControllerSetupFunc) Option {
 	return func(r *Reconciler) error {
 		r.controllerSetupFuncs = append(r.controllerSetupFuncs, f)
+		return nil
+	}
+}
+
+func WithAggressiveConflictResolution(enabled bool) Option {
+	return func(r *Reconciler) error {
+		r.enableAggressiveConflictResolution = enabled
 		return nil
 	}
 }
