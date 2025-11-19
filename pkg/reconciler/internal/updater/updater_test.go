@@ -205,53 +205,45 @@ var _ = Describe("Updater", func() {
 			Expect(cl.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
 			Expect(obj.GetFinalizers()).ToNot(ContainElement(testFinalizer))
 		})
-
-		It("should preserve unknown status conditions", func() {
-			// Add external status condition on cluster.
-			clusterObj := obj.DeepCopy()
-			unknownCondition := map[string]interface{}{
-				"type":   "UnknownCondition",
-				"status": string(corev1.ConditionTrue),
-				"reason": "ExternallyManaged",
-			}
-			Expect(unstructured.SetNestedSlice(clusterObj.Object, []interface{}{unknownCondition}, "status", "conditions")).To(Succeed())
-			err := retryOnTransientError(func() error {
-				return cl.Status().Update(context.TODO(), clusterObj)
+		Context("when in-cluster object has been updated", func() {
+			JustBeforeEach(func() {
+				// Add external status condition on cluster.
+				clusterObj := obj.DeepCopy()
+				unknownCondition := map[string]interface{}{
+					"type":   "UnknownCondition",
+					"status": string(corev1.ConditionTrue),
+					"reason": "ExternallyManaged",
+				}
+				Expect(unstructured.SetNestedSlice(clusterObj.Object, []interface{}{unknownCondition}, "status", "conditions")).To(Succeed())
+				err := retryOnTransientError(func() error {
+					return cl.Status().Update(context.TODO(), clusterObj)
+				})
+				Expect(err).ToNot(HaveOccurred())
 			})
-			Expect(err).ToNot(HaveOccurred())
-			// Add status condition using updater.
-			u.UpdateStatus(EnsureCondition(conditions.Deployed(corev1.ConditionTrue, "", "")))
-			u.EnableAggressiveConflictResolution()
-			Expect(u.Apply(context.TODO(), obj)).To(Succeed())
-			// Retrieve object from cluster and extract status conditions.
-			Expect(cl.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
-			objConditionsSlice, _, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
-			Expect(err).ToNot(HaveOccurred())
-			objConditions, err := pkgStatus.FromUnstructured(objConditionsSlice)
-			Expect(err).ToNot(HaveOccurred())
-			// Verify both status conditions are present.
-			Expect(objConditions.IsTrueFor(pkgStatus.ConditionType("UnknownCondition"))).To(BeTrue())
-			Expect(objConditions.IsTrueFor(pkgStatus.ConditionType("Deployed"))).To(BeTrue())
-		})
 
-		It("should fail on conflict without aggressive resolution", func() {
-			// Add external status condition on cluster.
-			clusterObj := obj.DeepCopy()
-			unknownCondition := map[string]interface{}{
-				"type":   "UnknownCondition",
-				"status": string(corev1.ConditionTrue),
-				"reason": "ExternallyManaged",
-			}
-			Expect(unstructured.SetNestedSlice(clusterObj.Object, []interface{}{unknownCondition}, "status", "conditions")).To(Succeed())
-			Expect(retryOnTransientError(func() error {
-				return cl.Status().Update(context.TODO(), clusterObj)
-			})).ToNot(HaveOccurred())
-			Expect(cl.Status().Update(context.TODO(), clusterObj)).To(Succeed())
-			// Add status condition using updater.
-			u.UpdateStatus(EnsureCondition(conditions.Deployed(corev1.ConditionTrue, "", "")))
-			err := u.Apply(context.TODO(), obj)
-			// Verify conflict error is returned.
-			Expect(apierrors.IsConflict(err)).To(BeTrue())
+			It("should preserve unknown status conditions", func() {
+				// Add status condition using updater.
+				u.UpdateStatus(EnsureCondition(conditions.Deployed(corev1.ConditionTrue, "", "")))
+				u.EnableAggressiveConflictResolution()
+				Expect(u.Apply(context.TODO(), obj)).To(Succeed())
+				// Retrieve object from cluster and extract status conditions.
+				Expect(cl.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
+				objConditionsSlice, _, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
+				Expect(err).ToNot(HaveOccurred())
+				objConditions, err := pkgStatus.FromUnstructured(objConditionsSlice)
+				Expect(err).ToNot(HaveOccurred())
+				// Verify both status conditions are present.
+				Expect(objConditions.IsTrueFor(pkgStatus.ConditionType("UnknownCondition"))).To(BeTrue())
+				Expect(objConditions.IsTrueFor(pkgStatus.ConditionType("Deployed"))).To(BeTrue())
+			})
+
+			It("should fail on conflict without aggressive resolution", func() {
+				// Add status condition using updater.
+				u.UpdateStatus(EnsureCondition(conditions.Deployed(corev1.ConditionTrue, "", "")))
+				err := u.Apply(context.TODO(), obj)
+				// Verify conflict error is returned.
+				Expect(apierrors.IsConflict(err)).To(BeTrue())
+			})
 		})
 	})
 })
