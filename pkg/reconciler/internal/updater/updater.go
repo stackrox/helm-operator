@@ -137,7 +137,7 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 		statusUpdateAttemptNumber++
 		updateErr := u.client.Status().Update(ctx, obj)
 		if errors.IsConflict(updateErr) && u.enableAggressiveConflictResolution {
-			resolved, resolveErr := u.tryStatusUpdateConflictResolution(ctx, baseObj)
+			resolved, resolveErr := u.tryRefreshForStatusUpdate(ctx, baseObj)
 			if resolveErr != nil {
 				return resolveErr
 			}
@@ -171,7 +171,7 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 		updateAttemptNumber++
 		updateErr := u.client.Update(ctx, obj)
 		if errors.IsConflict(updateErr) && u.enableAggressiveConflictResolution {
-			resolved, resolveErr := u.tryUpdateConflictResolution(ctx, baseObj)
+			resolved, resolveErr := u.tryRefreshForUpdate(ctx, baseObj)
 			if resolveErr != nil {
 				return resolveErr
 			}
@@ -189,9 +189,9 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 	return err
 }
 
-func (u *Updater) tryStatusUpdateConflictResolution(ctx context.Context, obj *unstructured.Unstructured) (bool, error) {
+func (u *Updater) tryRefreshForStatusUpdate(ctx context.Context, obj *unstructured.Unstructured) (bool, error) {
 	u.logger.V(1).Info("Status update conflict detected")
-	// Retrieve current version from the cluster.
+	// Re-fetch object with client.
 	current := &unstructured.Unstructured{}
 	current.SetGroupVersionKind(obj.GroupVersionKind())
 	objectKey := client.ObjectKeyFromObject(obj)
@@ -201,13 +201,14 @@ func (u *Updater) tryStatusUpdateConflictResolution(ctx context.Context, obj *un
 	}
 
 	obj.Object = current.Object
-	u.logger.V(1).Info("Resolved status update conflict by fetching current in-cluster version")
+	u.logger.V(1).Info("Refreshed object", "namespace",
+		objectKey.Namespace, "name", objectKey.Name, "gvk", obj.GroupVersionKind())
 	return true, nil
 }
 
-func (u *Updater) tryUpdateConflictResolution(ctx context.Context, obj *unstructured.Unstructured) (bool, error) {
+func (u *Updater) tryRefreshForUpdate(ctx context.Context, obj *unstructured.Unstructured) (bool, error) {
 	u.logger.V(1).Info("Update conflict detected")
-	// Retrieve current version from the cluster.
+	// Re-fetch object with client.
 	current := &unstructured.Unstructured{}
 	current.SetGroupVersionKind(obj.GroupVersionKind())
 	objectKey := client.ObjectKeyFromObject(obj)
@@ -218,14 +219,17 @@ func (u *Updater) tryUpdateConflictResolution(ctx context.Context, obj *unstruct
 
 	if !reflect.DeepEqual(obj.Object["spec"], current.Object["spec"]) {
 		// Diff in object spec. Nothing we can do about it -> Fail.
-		u.logger.V(1).Info("Cluster resource cannot be updated due to spec mismatch",
-			"namespace", objectKey.Namespace, "name", objectKey.Name, "gkv", obj.GroupVersionKind(),
+		u.logger.V(1).Info("Not refreshing object due to spec mismatch",
+			"namespace", objectKey.Namespace,
+			"name", objectKey.Name,
+			"gkv", obj.GroupVersionKind(),
 		)
 		return false, nil
 	}
 
 	obj.Object = current.Object
-	u.logger.V(1).Info("Resolved update conflict by fetching current in-cluster version")
+	u.logger.V(1).Info("Refreshed object",
+		"namespace", objectKey.Namespace, "name", objectKey.Name, "gvk", obj.GroupVersionKind())
 	return true, nil
 }
 
