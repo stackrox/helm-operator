@@ -22,7 +22,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	kubeclock "k8s.io/utils/clock"
 )
 
@@ -189,20 +188,4 @@ func (conditions Conditions) MarshalJSON() ([]byte, error) {
 		return conds[a].Type < conds[b].Type
 	})
 	return json.Marshal(conds)
-}
-
-func FromUnstructured(conditionsSlice []interface{}) (Conditions, error) {
-	conditions := make(Conditions, 0, len(conditionsSlice))
-	for _, c := range conditionsSlice {
-		condMap, ok := c.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		cond := Condition{}
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(condMap, &cond); err != nil {
-			return nil, err
-		}
-		conditions = append(conditions, cond)
-	}
-	return conditions, nil
 }

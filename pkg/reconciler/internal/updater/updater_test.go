@@ -28,12 +28,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	"github.com/operator-framework/helm-operator-plugins/pkg/internal/status"
 	pkgStatus "github.com/operator-framework/helm-operator-plugins/pkg/internal/status"
 	"github.com/operator-framework/helm-operator-plugins/pkg/reconciler/internal/conditions"
 )
@@ -230,8 +232,7 @@ var _ = Describe("Updater", func() {
 				Expect(cl.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
 				objConditionsSlice, _, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
 				Expect(err).ToNot(HaveOccurred())
-				objConditions, err := pkgStatus.FromUnstructured(objConditionsSlice)
-				Expect(err).ToNot(HaveOccurred())
+				objConditions := conditionsFromUnstructured(objConditionsSlice)
 				// Verify both status conditions are present.
 				Expect(objConditions.IsTrueFor(pkgStatus.ConditionType("UnknownCondition"))).To(BeTrue())
 				Expect(objConditions.IsTrueFor(pkgStatus.ConditionType("Deployed"))).To(BeTrue())
@@ -417,3 +418,16 @@ var _ = Describe("statusFor", func() {
 		Expect(status.Conditions.IsTrueFor(pkgStatus.ConditionType("UnknownCondition"))).To(BeTrue())
 	})
 })
+
+func conditionsFromUnstructured(conditionsSlice []interface{}) status.Conditions {
+	conditions := make(status.Conditions, 0, len(conditionsSlice))
+	for _, c := range conditionsSlice {
+		condMap, ok := c.(map[string]interface{})
+		Expect(ok).To(BeTrue(), "condition is not a map[string]interface{}")
+		cond := status.Condition{}
+		err := runtime.DefaultUnstructuredConverter.FromUnstructured(condMap, &cond)
+		Expect(err).ToNot(HaveOccurred(), "failed to convert status condition from unstructured")
+		conditions = append(conditions, cond)
+	}
+	return conditions
+}
