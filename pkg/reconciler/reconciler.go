@@ -698,10 +698,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 		}
 	}
 
-	u := updater.New(r.client, log)
-	if r.enableAggressiveConflictResolution {
-		u.EnableAggressiveConflictResolution()
-	}
+	u := r.newUpdater(log)
 	defer func() {
 		applyErr := u.Apply(ctx, obj)
 		if err == nil && !apierrors.IsNotFound(applyErr) {
@@ -854,6 +851,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 	return ctrl.Result{RequeueAfter: r.reconcilePeriod}, nil
 }
 
+func (r *Reconciler) newUpdater(log logr.Logger) updater.Updater {
+	u := updater.New(r.client, log)
+	if r.enableAggressiveConflictResolution {
+		u.EnableAggressiveConflictResolution()
+	}
+	return u
+}
+
 func (r *Reconciler) getValues(ctx context.Context, obj *unstructured.Unstructured) (chartutil.Values, error) {
 	if err := internalvalues.ApplyOverrides(r.overrideValues, obj); err != nil {
 		return chartutil.Values{}, err
@@ -889,10 +894,7 @@ func (r *Reconciler) handleDeletion(ctx context.Context, actionClient helmclient
 		// and we need to be able to update the conditions on the CR to
 		// indicate that the uninstall failed.
 		if err := func() (err error) {
-			uninstallUpdater := updater.New(r.client, log)
-			if r.enableAggressiveConflictResolution {
-				uninstallUpdater.EnableAggressiveConflictResolution()
-			}
+			uninstallUpdater := r.newUpdater(log)
 			defer func() {
 				applyErr := uninstallUpdater.Apply(ctx, obj)
 				if err == nil {
