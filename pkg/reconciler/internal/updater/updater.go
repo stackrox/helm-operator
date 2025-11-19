@@ -110,10 +110,11 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 		return nil
 	}
 
+	backoff := retry.DefaultRetry
+
 	// Always update the status first. During uninstall, if
 	// we remove the finalizer, updating the status will fail
 	// because the object and its status will be garbage-collected.
-	backoff := retry.DefaultRetry
 	statusUpdateAttemptNumber := 0
 	err := retryOnRetryableUpdateError(backoff, func() error {
 		// Note that st will also include all status conditions, also those not managed by helm-operator.
