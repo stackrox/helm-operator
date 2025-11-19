@@ -101,8 +101,14 @@ func isRetryableUpdateError(err error) bool {
 //
 // A NotFound error means that the object has been deleted, and the reconciliation loop
 // needs to be restarted anew as well.
-func retryOnRetryableUpdateError(backoff wait.Backoff, f func() error) error {
-	return retry.OnError(backoff, isRetryableUpdateError, f)
+func retryOnRetryableUpdateError(backoff wait.Backoff, f func(attemptNum uint) error) error {
+	var attemptNum uint = 1
+	countingF := func() error {
+		err := f(attemptNum)
+		attemptNum++
+		return err
+	}
+	return retry.OnError(backoff, isRetryableUpdateError, countingF)
 }
 
 func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured) error {
@@ -115,8 +121,7 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 	// Always update the status first. During uninstall, if
 	// we remove the finalizer, updating the status will fail
 	// because the object and its status will be garbage-collected.
-	statusUpdateAttemptNumber := 0
-	err := retryOnRetryableUpdateError(backoff, func() error {
+	err := retryOnRetryableUpdateError(backoff, func(attemptNumber uint) error {
 		// Note that st will also include all status conditions, also those not managed by helm-operator.
 		obj := baseObj.DeepCopy()
 		st := statusFor(obj)
@@ -131,10 +136,9 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 		st.updateStatusObject()
 		obj.Object["status"] = st.StatusObject
 
-		if statusUpdateAttemptNumber > 0 {
-			u.logger.V(1).Info("Retrying status update", "attempt", statusUpdateAttemptNumber)
+		if attemptNumber > 1 {
+			u.logger.V(1).Info("Retrying status update", "attempt", attemptNumber)
 		}
-		statusUpdateAttemptNumber++
 		updateErr := u.client.Status().Update(ctx, obj)
 		if errors.IsConflict(updateErr) && u.enableAggressiveConflictResolution {
 			resolved, resolveErr := u.tryRefreshForStatusUpdate(ctx, baseObj)
@@ -155,8 +159,7 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 		return err
 	}
 
-	updateAttemptNumber := 0
-	err = retryOnRetryableUpdateError(backoff, func() error {
+	err = retryOnRetryableUpdateError(backoff, func(attemptNumber uint) error {
 		obj := baseObj.DeepCopy()
 		needsUpdate := false
 		for _, f := range u.updateFuncs {
@@ -165,10 +168,9 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 		if !needsUpdate {
 			return nil
 		}
-		if updateAttemptNumber > 0 {
-			u.logger.V(1).Info("Retrying update", "attempt", updateAttemptNumber)
+		if attemptNumber > 1 {
+			u.logger.V(1).Info("Retrying update", "attempt", attemptNumber)
 		}
-		updateAttemptNumber++
 		updateErr := u.client.Update(ctx, obj)
 		if errors.IsConflict(updateErr) && u.enableAggressiveConflictResolution {
 			resolved, resolveErr := u.tryRefreshForUpdate(ctx, baseObj)
