@@ -35,7 +35,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"github.com/operator-framework/helm-operator-plugins/pkg/internal/status"
 	pkgStatus "github.com/operator-framework/helm-operator-plugins/pkg/internal/status"
 	"github.com/operator-framework/helm-operator-plugins/pkg/reconciler/internal/conditions"
 )
@@ -419,12 +418,12 @@ var _ = Describe("statusFor", func() {
 	})
 })
 
-func conditionsFromUnstructured(conditionsSlice []interface{}) status.Conditions {
-	conditions := make(status.Conditions, 0, len(conditionsSlice))
+func conditionsFromUnstructured(conditionsSlice []interface{}) pkgStatus.Conditions {
+	conditions := make(pkgStatus.Conditions, 0, len(conditionsSlice))
 	for _, c := range conditionsSlice {
 		condMap, ok := c.(map[string]interface{})
 		Expect(ok).To(BeTrue(), "condition is not a map[string]interface{}")
-		cond := status.Condition{}
+		cond := pkgStatus.Condition{}
 		err := runtime.DefaultUnstructuredConverter.FromUnstructured(condMap, &cond)
 		Expect(err).ToNot(HaveOccurred(), "failed to convert status condition from unstructured")
 		conditions = append(conditions, cond)
