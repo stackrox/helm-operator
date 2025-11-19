@@ -215,9 +215,10 @@ var _ = Describe("Updater", func() {
 				"reason": "ExternallyManaged",
 			}
 			Expect(unstructured.SetNestedSlice(clusterObj.Object, []interface{}{unknownCondition}, "status", "conditions")).To(Succeed())
-			Expect(retryOnTransientError(func() error {
+			err := retryOnTransientError(func() error {
 				return cl.Status().Update(context.TODO(), clusterObj)
-			})).ToNot(HaveOccurred())
+			})
+			Expect(err).ToNot(HaveOccurred())
 			// Add status condition using updater.
 			u.UpdateStatus(EnsureCondition(conditions.Deployed(corev1.ConditionTrue, "", "")))
 			u.EnableAggressiveConflictResolution()
