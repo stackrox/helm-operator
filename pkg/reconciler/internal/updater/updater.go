@@ -95,9 +95,11 @@ func isRetryableUpdateError(err error) bool {
 // retryOnRetryableUpdateError retries the given function until it succeeds,
 // until the given backoff is exhausted, or until the error is not retryable.
 //
-// In case of a Conflict error, the update cannot be retried because the underlying
-// resource has been modified in the meantime, and the reconciliation loop needs
-// to be restarted anew.
+// In case of a Conflict error, the update is not retried by default because the
+// underlying resource has been modified in the meantime, and the reconciliation loop
+// needs to be restarted anew. However, when aggressive conflict resolution is enabled,
+// the updater attempts to refresh the object from the cluster and retry if it's safe
+// to do so (e.g., when only the status has changed).
 //
 // A NotFound error means that the object has been deleted, and the reconciliation loop
 // needs to be restarted anew as well.
