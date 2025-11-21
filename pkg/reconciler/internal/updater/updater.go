@@ -141,7 +141,8 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 		}
 		updateErr := u.client.Status().Update(ctx, obj)
 		if errors.IsConflict(updateErr) && u.enableAggressiveConflictResolution {
-			resolved, resolveErr := u.tryRefreshForStatusUpdate(ctx, baseObj)
+			u.logger.V(1).Info("Status update conflict detected")
+			resolved, resolveErr := u.tryRefresh(ctx, baseObj, isSafeForStatusUpdate)
 			if resolveErr != nil {
 				return resolveErr
 			}
@@ -173,7 +174,8 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 		}
 		updateErr := u.client.Update(ctx, obj)
 		if errors.IsConflict(updateErr) && u.enableAggressiveConflictResolution {
-			resolved, resolveErr := u.tryRefreshForUpdate(ctx, baseObj)
+			u.logger.V(1).Info("Update conflict detected")
+			resolved, resolveErr := u.tryRefresh(ctx, baseObj, isSafeForUpdate)
 			if resolveErr != nil {
 				return resolveErr
 			}
@@ -191,25 +193,24 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 	return err
 }
 
-func (u *Updater) tryRefreshForStatusUpdate(ctx context.Context, obj *unstructured.Unstructured) (bool, error) {
-	u.logger.V(1).Info("Status update conflict detected")
-	// Re-fetch object with client.
-	current := &unstructured.Unstructured{}
-	current.SetGroupVersionKind(obj.GroupVersionKind())
-	objectKey := client.ObjectKeyFromObject(obj)
-	if err := u.client.Get(ctx, objectKey, current); err != nil {
-		err = fmt.Errorf("refreshing object %s/%s: %w", objectKey.Namespace, objectKey.Name, err)
-		return false, err
-	}
-
-	obj.Object = current.Object
-	u.logger.V(1).Info("Refreshed object", "namespace",
-		objectKey.Namespace, "name", objectKey.Name, "gvk", obj.GroupVersionKind())
-	return true, nil
+func isSafeForStatusUpdate(_ logr.Logger, _ *unstructured.Unstructured, _ *unstructured.Unstructured) bool {
+	return true
 }
 
-func (u *Updater) tryRefreshForUpdate(ctx context.Context, obj *unstructured.Unstructured) (bool, error) {
-	u.logger.V(1).Info("Update conflict detected")
+func isSafeForUpdate(logger logr.Logger, inMemory *unstructured.Unstructured, onCluster *unstructured.Unstructured) bool {
+	if !reflect.DeepEqual(inMemory.Object["spec"], onCluster.Object["spec"]) {
+		// Diff in object spec. Nothing we can do about it -> Fail.
+		logger.V(1).Info("Not refreshing object due to spec mismatch",
+			"namespace", inMemory.GetNamespace(),
+			"name", inMemory.GetName(),
+			"gkv", inMemory.GroupVersionKind(),
+		)
+		return false
+	}
+	return true
+}
+
+func (u *Updater) tryRefresh(ctx context.Context, obj *unstructured.Unstructured, isSafe func(logger logr.Logger, inMemory *unstructured.Unstructured, onCluster *unstructured.Unstructured) bool) (bool, error) {
 	// Re-fetch object with client.
 	current := &unstructured.Unstructured{}
 	current.SetGroupVersionKind(obj.GroupVersionKind())
@@ -219,19 +220,15 @@ func (u *Updater) tryRefreshForUpdate(ctx context.Context, obj *unstructured.Uns
 		return false, err
 	}
 
-	if !reflect.DeepEqual(obj.Object["spec"], current.Object["spec"]) {
-		// Diff in object spec. Nothing we can do about it -> Fail.
-		u.logger.V(1).Info("Not refreshing object due to spec mismatch",
-			"namespace", objectKey.Namespace,
-			"name", objectKey.Name,
-			"gkv", obj.GroupVersionKind(),
-		)
+	if !isSafe(u.logger, obj, current) {
 		return false, nil
 	}
 
 	obj.Object = current.Object
 	u.logger.V(1).Info("Refreshed object",
-		"namespace", objectKey.Namespace, "name", objectKey.Name, "gvk", obj.GroupVersionKind())
+		"namespace", objectKey.Namespace,
+		"name", objectKey.Name,
+		"gvk", obj.GroupVersionKind())
 	return true, nil
 }
 
