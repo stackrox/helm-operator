@@ -245,7 +245,7 @@ var _ = Describe("Updater", func() {
 					"reason": "ExternallyManaged",
 				}
 				Expect(unstructured.SetNestedSlice(clusterObj.Object, []interface{}{unknownCondition}, "status", "conditions")).To(Succeed())
-				err := retryOnTransientError(func() error {
+				err := retryOnceOnTransientError(func() error {
 					return cl.Status().Update(context.TODO(), clusterObj)
 				})
 				Expect(err).ToNot(HaveOccurred())
@@ -277,7 +277,7 @@ var _ = Describe("Updater", func() {
 	})
 })
 
-func retryOnTransientError(f func() error) error {
+func retryOnceOnTransientError(f func() error) error {
 	err := f()
 	if errors.Is(err, errTransient) {
 		err = f()
