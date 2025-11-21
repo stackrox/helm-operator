@@ -691,9 +691,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 	// This is a safety measure to ensure that the chart is fully uninstalled before the CR is deleted.
 	if obj.GetDeletionTimestamp() == nil && !controllerutil.ContainsFinalizer(obj, uninstallFinalizer) {
 		log.V(1).Info("Adding uninstall finalizer.")
-		patch := client.MergeFrom(obj.DeepCopy())
 		obj.SetFinalizers(append(obj.GetFinalizers(), uninstallFinalizer))
-		if err := r.client.Patch(ctx, obj, patch); err != nil {
+		if err := r.client.Update(ctx, obj); err != nil {
 			return ctrl.Result{}, errs.Wrapf(err, "failed to add uninstall finalizer to %s/%s", req.NamespacedName.Namespace, req.NamespacedName.Name)
 		}
 	}
