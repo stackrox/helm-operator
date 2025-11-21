@@ -206,6 +206,35 @@ var _ = Describe("Updater", func() {
 			Expect(cl.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
 			Expect(obj.GetFinalizers()).ToNot(ContainElement(testFinalizer))
 		})
+		It("should preserve a finalizer when removing a different one", func() {
+			otherFinalizer := "otherFinalizer"
+			obj.SetFinalizers([]string{testFinalizer, otherFinalizer})
+			Expect(cl.Update(context.TODO(), obj)).To(Succeed())
+
+			u.Update(func(u *unstructured.Unstructured) bool {
+				return controllerutil.RemoveFinalizer(u, testFinalizer)
+			})
+			Expect(u.Apply(context.TODO(), obj)).To(Succeed())
+			Expect(cl.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
+			Expect(obj.GetFinalizers()).ToNot(ContainElement(testFinalizer))
+			Expect(obj.GetFinalizers()).To(ContainElement(otherFinalizer))
+		})
+		Context("with aggressive conflict resolution enabled", func() {
+			It("should preserve a finalizer when removing a different one", func() {
+				otherFinalizer := "otherFinalizer"
+				obj.SetFinalizers([]string{testFinalizer, otherFinalizer})
+				Expect(cl.Update(context.TODO(), obj)).To(Succeed())
+				u.EnableAggressiveConflictResolution()
+
+				u.Update(func(u *unstructured.Unstructured) bool {
+					return controllerutil.RemoveFinalizer(u, testFinalizer)
+				})
+				Expect(u.Apply(context.TODO(), obj)).To(Succeed())
+				Expect(cl.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
+				Expect(obj.GetFinalizers()).ToNot(ContainElement(testFinalizer))
+				Expect(obj.GetFinalizers()).To(ContainElement(otherFinalizer))
+			})
+		})
 		Context("when in-cluster object has been updated", func() {
 			JustBeforeEach(func() {
 				// Add external status condition on cluster.
