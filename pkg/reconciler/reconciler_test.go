@@ -480,6 +480,16 @@ var _ = Describe("Reconciler", func() {
 				Expect(r.selectorPredicate.Generic(event.GenericEvent{Object: objUnlabeled})).To(BeFalse())
 			})
 		})
+		_ = Describe("WithAggressiveConflictResolution", func() {
+			It("should set aggressive conflict resolution to true", func() {
+				Expect(WithAggressiveConflictResolution(true)(r)).To(Succeed())
+				Expect(r.enableAggressiveConflictResolution).To(BeTrue())
+			})
+			It("should set aggressive conflict resolution to false", func() {
+				Expect(WithAggressiveConflictResolution(false)(r)).To(Succeed())
+				Expect(r.enableAggressiveConflictResolution).To(BeFalse())
+			})
+		})
 	})
 
 	_ = Describe("Reconcile", func() {

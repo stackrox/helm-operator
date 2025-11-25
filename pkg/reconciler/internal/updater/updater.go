@@ -18,7 +18,10 @@ package updater
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 
+	"github.com/go-logr/logr"
 	"helm.sh/helm/v3/pkg/release"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -33,17 +36,26 @@ import (
 	"github.com/operator-framework/helm-operator-plugins/pkg/internal/status"
 )
 
-func New(client client.Client) Updater {
+func New(client client.Client, logger logr.Logger) Updater {
+	logger = logger.WithName("updater")
 	return Updater{
 		client: client,
+		logger: logger,
 	}
 }
 
 type Updater struct {
 	isCanceled        bool
 	client            client.Client
+	logger            logr.Logger
 	updateFuncs       []UpdateFunc
 	updateStatusFuncs []UpdateStatusFunc
+
+	enableAggressiveConflictResolution bool
+}
+
+func (u *Updater) EnableAggressiveConflictResolution() {
+	u.enableAggressiveConflictResolution = true
 }
 
 type UpdateFunc func(*unstructured.Unstructured) bool
@@ -83,54 +95,143 @@ func isRetryableUpdateError(err error) bool {
 // retryOnRetryableUpdateError retries the given function until it succeeds,
 // until the given backoff is exhausted, or until the error is not retryable.
 //
-// In case of a Conflict error, the update cannot be retried because the underlying
-// resource has been modified in the meantime, and the reconciliation loop needs
-// to be restarted anew.
+// In case of a Conflict error, the update is not retried by default because the
+// underlying resource has been modified in the meantime, and the reconciliation loop
+// needs to be restarted anew. However, when aggressive conflict resolution is enabled,
+// the updater attempts to refresh the object from the cluster and retry if it's safe
+// to do so (e.g., when only the status has changed).
 //
 // A NotFound error means that the object has been deleted, and the reconciliation loop
 // needs to be restarted anew as well.
-func retryOnRetryableUpdateError(backoff wait.Backoff, f func() error) error {
-	return retry.OnError(backoff, isRetryableUpdateError, f)
+func retryOnRetryableUpdateError(backoff wait.Backoff, f func(attemptNum uint) error) error {
+	var attemptNum uint = 1
+	countingF := func() error {
+		err := f(attemptNum)
+		attemptNum++
+		return err
+	}
+	return retry.OnError(backoff, isRetryableUpdateError, countingF)
 }
 
-func (u *Updater) Apply(ctx context.Context, obj *unstructured.Unstructured) error {
+func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured) error {
 	if u.isCanceled {
 		return nil
 	}
 
 	backoff := retry.DefaultRetry
 
-	st := statusFor(obj)
-	needsStatusUpdate := false
-	for _, f := range u.updateStatusFuncs {
-		needsStatusUpdate = f(st) || needsStatusUpdate
-	}
-
 	// Always update the status first. During uninstall, if
 	// we remove the finalizer, updating the status will fail
 	// because the object and its status will be garbage-collected.
-	if needsStatusUpdate {
+	err := retryOnRetryableUpdateError(backoff, func(attemptNumber uint) error {
+		// Note that st will also include all status conditions, also those not managed by helm-operator.
+		obj := baseObj.DeepCopy()
+		st := statusFor(obj)
+		needsStatusUpdate := false
+		for _, f := range u.updateStatusFuncs {
+			needsStatusUpdate = f(st) || needsStatusUpdate
+		}
+
+		if !needsStatusUpdate {
+			return nil
+		}
 		st.updateStatusObject()
 		obj.Object["status"] = st.StatusObject
-		if err := retryOnRetryableUpdateError(backoff, func() error {
-			return u.client.Status().Update(ctx, obj)
-		}); err != nil {
-			return err
+
+		if attemptNumber > 1 {
+			u.logger.V(1).Info("Retrying status update", "attempt", attemptNumber)
 		}
+		updateErr := u.client.Status().Update(ctx, obj)
+		if errors.IsConflict(updateErr) && u.enableAggressiveConflictResolution {
+			u.logger.V(1).Info("Status update conflict detected")
+			resolved, resolveErr := u.tryRefresh(ctx, baseObj, isSafeForStatusUpdate)
+			if resolveErr != nil {
+				return resolveErr
+			}
+			if !resolved {
+				return updateErr
+			}
+			return fmt.Errorf("status update conflict") // retriable error.
+		} else if updateErr != nil {
+			return updateErr
+		}
+		baseObj.Object = obj.Object
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
-	needsUpdate := false
-	for _, f := range u.updateFuncs {
-		needsUpdate = f(obj) || needsUpdate
-	}
-	if needsUpdate {
-		if err := retryOnRetryableUpdateError(backoff, func() error {
-			return u.client.Update(ctx, obj)
-		}); err != nil {
-			return err
+	err = retryOnRetryableUpdateError(backoff, func(attemptNumber uint) error {
+		obj := baseObj.DeepCopy()
+		needsUpdate := false
+		for _, f := range u.updateFuncs {
+			needsUpdate = f(obj) || needsUpdate
 		}
+		if !needsUpdate {
+			return nil
+		}
+		if attemptNumber > 1 {
+			u.logger.V(1).Info("Retrying update", "attempt", attemptNumber)
+		}
+		updateErr := u.client.Update(ctx, obj)
+		if errors.IsConflict(updateErr) && u.enableAggressiveConflictResolution {
+			u.logger.V(1).Info("Update conflict detected")
+			resolved, resolveErr := u.tryRefresh(ctx, baseObj, isSafeForUpdate)
+			if resolveErr != nil {
+				return resolveErr
+			}
+			if !resolved {
+				return updateErr
+			}
+			return fmt.Errorf("update conflict due to externally-managed status conditions") // retriable error.
+		} else if updateErr != nil {
+			return updateErr
+		}
+		baseObj.Object = obj.Object
+		return nil
+	})
+
+	return err
+}
+
+func isSafeForStatusUpdate(_ logr.Logger, _ *unstructured.Unstructured, _ *unstructured.Unstructured) bool {
+	return true
+}
+
+func isSafeForUpdate(logger logr.Logger, inMemory *unstructured.Unstructured, onCluster *unstructured.Unstructured) bool {
+	if !reflect.DeepEqual(inMemory.Object["spec"], onCluster.Object["spec"]) {
+		// Diff in object spec. Nothing we can do about it -> Fail.
+		logger.V(1).Info("Not refreshing object due to spec mismatch",
+			"namespace", inMemory.GetNamespace(),
+			"name", inMemory.GetName(),
+			"gkv", inMemory.GroupVersionKind(),
+		)
+		return false
 	}
-	return nil
+	return true
+}
+
+func (u *Updater) tryRefresh(ctx context.Context, obj *unstructured.Unstructured, isSafe func(logger logr.Logger, inMemory *unstructured.Unstructured, onCluster *unstructured.Unstructured) bool) (bool, error) {
+	// Re-fetch object with client.
+	current := &unstructured.Unstructured{}
+	current.SetGroupVersionKind(obj.GroupVersionKind())
+	objectKey := client.ObjectKeyFromObject(obj)
+	if err := u.client.Get(ctx, objectKey, current); err != nil {
+		err = fmt.Errorf("refreshing object %s/%s: %w", objectKey.Namespace, objectKey.Name, err)
+		return false, err
+	}
+
+	if !isSafe(u.logger, obj, current) {
+		return false, nil
+	}
+
+	obj.Object = current.Object
+	u.logger.V(1).Info("Refreshed object",
+		"namespace", objectKey.Namespace,
+		"name", objectKey.Name,
+		"gvk", obj.GroupVersionKind())
+	return true, nil
 }
 
 func RemoveFinalizer(finalizer string) UpdateFunc {

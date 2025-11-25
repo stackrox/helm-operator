@@ -100,6 +100,8 @@ type Reconciler struct {
 	upgradeAnnotations       map[string]annotation.Upgrade
 	uninstallAnnotations     map[string]annotation.Uninstall
 	pauseReconcileAnnotation string
+
+	enableAggressiveConflictResolution bool
 }
 
 // New creates a new Reconciler that reconciles custom resources that define a
@@ -617,6 +619,13 @@ func WithControllerSetupFunc(f ControllerSetupFunc) Option {
 	}
 }
 
+func WithAggressiveConflictResolution(enabled bool) Option {
+	return func(r *Reconciler) error {
+		r.enableAggressiveConflictResolution = enabled
+		return nil
+	}
+}
+
 // ControllerSetup allows restricted access to the Controller using the WithControllerSetupFunc option.
 // Currently, the only supposed configuration is adding additional watchers do the controller.
 type ControllerSetup interface {
@@ -688,7 +697,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 		}
 	}
 
-	u := updater.New(r.client)
+	u := r.newUpdater(log)
 	defer func() {
 		applyErr := u.Apply(ctx, obj)
 		if err == nil && !apierrors.IsNotFound(applyErr) {
@@ -841,6 +850,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (_ ctrl.Re
 	return ctrl.Result{RequeueAfter: r.reconcilePeriod}, nil
 }
 
+func (r *Reconciler) newUpdater(log logr.Logger) updater.Updater {
+	u := updater.New(r.client, log)
+	if r.enableAggressiveConflictResolution {
+		u.EnableAggressiveConflictResolution()
+	}
+	return u
+}
+
 func (r *Reconciler) getValues(ctx context.Context, obj *unstructured.Unstructured) (chartutil.Values, error) {
 	if err := internalvalues.ApplyOverrides(r.overrideValues, obj); err != nil {
 		return chartutil.Values{}, err
@@ -876,7 +893,7 @@ func (r *Reconciler) handleDeletion(ctx context.Context, actionClient helmclient
 		// and we need to be able to update the conditions on the CR to
 		// indicate that the uninstall failed.
 		if err := func() (err error) {
-			uninstallUpdater := updater.New(r.client)
+			uninstallUpdater := r.newUpdater(log)
 			defer func() {
 				applyErr := uninstallUpdater.Apply(ctx, obj)
 				if err == nil {
