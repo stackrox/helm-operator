@@ -144,7 +144,7 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 		updateErr := u.client.Status().Update(ctx, obj)
 		if errors.IsConflict(updateErr) && u.enableAggressiveConflictResolution {
 			u.logger.V(1).Info("Status update conflict detected")
-			resolved, resolveErr := u.tryRefresh(ctx, baseObj, isSafeForStatusUpdate)
+			resolved, resolveErr := u.tryRefresh(ctx, baseObj)
 			if resolveErr != nil {
 				return resolveErr
 			}
@@ -177,7 +177,7 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 		updateErr := u.client.Update(ctx, obj)
 		if errors.IsConflict(updateErr) && u.enableAggressiveConflictResolution {
 			u.logger.V(1).Info("Update conflict detected")
-			resolved, resolveErr := u.tryRefresh(ctx, baseObj, isSafeForUpdate)
+			resolved, resolveErr := u.tryRefresh(ctx, baseObj)
 			if resolveErr != nil {
 				return resolveErr
 			}
@@ -195,11 +195,20 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 	return err
 }
 
-func isSafeForStatusUpdate(_ logr.Logger, _ *unstructured.Unstructured, _ *unstructured.Unstructured) bool {
-	return true
-}
-
 func isSafeForUpdate(logger logr.Logger, inMemory *unstructured.Unstructured, onCluster *unstructured.Unstructured) bool {
+	// Compare metadata (excluding resourceVersion).
+	inMemoryMetadata := metadataWithoutResourceVersion(inMemory)
+	onClusterMetadata := metadataWithoutResourceVersion(onCluster)
+	if !reflect.DeepEqual(inMemoryMetadata, onClusterMetadata) {
+		// Diff in generation. Nothing we can do about it -> Fail.
+		logger.V(1).Info("Not refreshing object due to generation mismatch",
+			"namespace", inMemory.GetNamespace(),
+			"name", inMemory.GetName(),
+			"gkv", inMemory.GroupVersionKind(),
+		)
+		return false
+	}
+	// Extra verification to make sure that the spec has not changed.
 	if !reflect.DeepEqual(inMemory.Object["spec"], onCluster.Object["spec"]) {
 		// Diff in object spec. Nothing we can do about it -> Fail.
 		logger.V(1).Info("Not refreshing object due to spec mismatch",
@@ -212,7 +221,22 @@ func isSafeForUpdate(logger logr.Logger, inMemory *unstructured.Unstructured, on
 	return true
 }
 
-func (u *Updater) tryRefresh(ctx context.Context, obj *unstructured.Unstructured, isSafe func(logger logr.Logger, inMemory *unstructured.Unstructured, onCluster *unstructured.Unstructured) bool) (bool, error) {
+func metadataWithoutResourceVersion(u *unstructured.Unstructured) map[string]interface{} {
+	metadata, ok := u.Object["metadata"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	modifiedMetadata := make(map[string]interface{}, len(metadata))
+	for k, v := range metadata {
+		if k == "resourceVersion" {
+			continue
+		}
+		modifiedMetadata[k] = v
+	}
+	return modifiedMetadata
+}
+
+func (u *Updater) tryRefresh(ctx context.Context, obj *unstructured.Unstructured) (bool, error) {
 	// Re-fetch object with client.
 	current := &unstructured.Unstructured{}
 	current.SetGroupVersionKind(obj.GroupVersionKind())
@@ -222,7 +246,7 @@ func (u *Updater) tryRefresh(ctx context.Context, obj *unstructured.Unstructured
 		return false, err
 	}
 
-	if !isSafe(u.logger, obj, current) {
+	if !isSafeForUpdate(u.logger, obj, current) {
 		return false, nil
 	}
 

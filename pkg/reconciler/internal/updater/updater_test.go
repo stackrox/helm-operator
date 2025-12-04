@@ -237,6 +237,9 @@ var _ = Describe("Updater", func() {
 		})
 		Context("when in-cluster object has been updated", func() {
 			JustBeforeEach(func() {
+				// Refresh obj first with what is on the cluster, otherwise the following Apply() calls will fail due to
+				// subtle changes in obj's spec and its refreshed counterpart, both of which are empty, but not in the same way...
+				Expect(cl.Get(context.TODO(), types.NamespacedName{Namespace: "testNamespace", Name: "testDeployment"}, obj)).To(Succeed())
 				// Add external status condition on cluster.
 				clusterObj := obj.DeepCopy()
 				unknownCondition := map[string]interface{}{
