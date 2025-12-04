@@ -144,7 +144,7 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 		updateErr := u.client.Status().Update(ctx, obj)
 		if errors.IsConflict(updateErr) && u.enableAggressiveConflictResolution {
 			u.logger.V(1).Info("Status update conflict detected")
-			resolved, resolveErr := u.tryRefresh(ctx, baseObj, isSafeForUpdate)
+			resolved, resolveErr := u.tryRefresh(ctx, baseObj)
 			if resolveErr != nil {
 				return resolveErr
 			}
@@ -177,7 +177,7 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 		updateErr := u.client.Update(ctx, obj)
 		if errors.IsConflict(updateErr) && u.enableAggressiveConflictResolution {
 			u.logger.V(1).Info("Update conflict detected")
-			resolved, resolveErr := u.tryRefresh(ctx, baseObj, isSafeForUpdate)
+			resolved, resolveErr := u.tryRefresh(ctx, baseObj)
 			if resolveErr != nil {
 				return resolveErr
 			}
@@ -236,7 +236,7 @@ func metadataWithoutResourceVersion(u *unstructured.Unstructured) map[string]int
 	return modifiedMetadata
 }
 
-func (u *Updater) tryRefresh(ctx context.Context, obj *unstructured.Unstructured, isSafe func(logger logr.Logger, inMemory *unstructured.Unstructured, onCluster *unstructured.Unstructured) bool) (bool, error) {
+func (u *Updater) tryRefresh(ctx context.Context, obj *unstructured.Unstructured) (bool, error) {
 	// Re-fetch object with client.
 	current := &unstructured.Unstructured{}
 	current.SetGroupVersionKind(obj.GroupVersionKind())
@@ -246,7 +246,7 @@ func (u *Updater) tryRefresh(ctx context.Context, obj *unstructured.Unstructured
 		return false, err
 	}
 
-	if !isSafe(u.logger, obj, current) {
+	if !isSafeForUpdate(u.logger, obj, current) {
 		return false, nil
 	}
 
