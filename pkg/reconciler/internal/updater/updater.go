@@ -196,7 +196,10 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 }
 
 func isSafeForUpdate(logger logr.Logger, inMemory *unstructured.Unstructured, onCluster *unstructured.Unstructured) bool {
-	if inMemory.GetGeneration() != onCluster.GetGeneration() {
+	// Compare metadata (excluding resourceVersion).
+	inMemoryMetadata := metadataWithoutResourceVersion(inMemory)
+	onClusterMetadata := metadataWithoutResourceVersion(onCluster)
+	if !reflect.DeepEqual(inMemoryMetadata, onClusterMetadata) {
 		// Diff in generation. Nothing we can do about it -> Fail.
 		logger.V(1).Info("Not refreshing object due to generation mismatch",
 			"namespace", inMemory.GetNamespace(),
@@ -216,6 +219,21 @@ func isSafeForUpdate(logger logr.Logger, inMemory *unstructured.Unstructured, on
 		return false
 	}
 	return true
+}
+
+func metadataWithoutResourceVersion(u *unstructured.Unstructured) map[string]interface{} {
+	metadata, ok := u.Object["metadata"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	modifiedMetadata := make(map[string]interface{}, len(metadata))
+	for k, v := range metadata {
+		if k == "resourceVersion" {
+			continue
+		}
+		modifiedMetadata[k] = v
+	}
+	return modifiedMetadata
 }
 
 func (u *Updater) tryRefresh(ctx context.Context, obj *unstructured.Unstructured, isSafe func(logger logr.Logger, inMemory *unstructured.Unstructured, onCluster *unstructured.Unstructured) bool) (bool, error) {
