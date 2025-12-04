@@ -144,7 +144,7 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 		updateErr := u.client.Status().Update(ctx, obj)
 		if errors.IsConflict(updateErr) && u.enableAggressiveConflictResolution {
 			u.logger.V(1).Info("Status update conflict detected")
-			resolved, resolveErr := u.tryRefresh(ctx, baseObj, isSafeForStatusUpdate)
+			resolved, resolveErr := u.tryRefresh(ctx, baseObj, isSafeForUpdate)
 			if resolveErr != nil {
 				return resolveErr
 			}
@@ -195,11 +195,17 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 	return err
 }
 
-func isSafeForStatusUpdate(_ logr.Logger, _ *unstructured.Unstructured, _ *unstructured.Unstructured) bool {
-	return true
-}
-
 func isSafeForUpdate(logger logr.Logger, inMemory *unstructured.Unstructured, onCluster *unstructured.Unstructured) bool {
+	if inMemory.GetGeneration() != onCluster.GetGeneration() {
+		// Diff in generation. Nothing we can do about it -> Fail.
+		logger.V(1).Info("Not refreshing object due to generation mismatch",
+			"namespace", inMemory.GetNamespace(),
+			"name", inMemory.GetName(),
+			"gkv", inMemory.GroupVersionKind(),
+		)
+		return false
+	}
+	// Extra verification to make sure that the spec has not changed.
 	if !reflect.DeepEqual(inMemory.Object["spec"], onCluster.Object["spec"]) {
 		// Diff in object spec. Nothing we can do about it -> Fail.
 		logger.V(1).Info("Not refreshing object due to spec mismatch",
