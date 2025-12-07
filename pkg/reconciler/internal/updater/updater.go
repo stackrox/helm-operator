@@ -200,8 +200,8 @@ func isSafeForUpdate(logger logr.Logger, inMemory *unstructured.Unstructured, on
 	inMemoryMetadata := metadataWithoutResourceVersion(inMemory)
 	onClusterMetadata := metadataWithoutResourceVersion(onCluster)
 	if !reflect.DeepEqual(inMemoryMetadata, onClusterMetadata) {
-		// Diff in generation. Nothing we can do about it -> Fail.
-		logger.V(1).Info("Not refreshing object due to generation mismatch",
+		// Diff in metadata. Nothing we can do about it -> Fail.
+		logger.V(1).Info("Not refreshing object due to metadata mismatch",
 			"namespace", inMemory.GetNamespace(),
 			"name", inMemory.GetName(),
 			"gkv", inMemory.GroupVersionKind(),
