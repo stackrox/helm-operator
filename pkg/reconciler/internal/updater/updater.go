@@ -149,7 +149,7 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 				return resolveErr
 			}
 			if !resolved {
-				return updateErr
+				return fmt.Errorf("refreshing object not considered safe during status update: %w", updateErr)
 			}
 			return fmt.Errorf("status update conflict") // retriable error.
 		} else if updateErr != nil {
@@ -182,7 +182,7 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 				return resolveErr
 			}
 			if !resolved {
-				return updateErr
+				return fmt.Errorf("refreshing object not considered safe during update: %w", updateErr)
 			}
 			return fmt.Errorf("update conflict due to externally-managed status conditions") // retriable error.
 		} else if updateErr != nil {
