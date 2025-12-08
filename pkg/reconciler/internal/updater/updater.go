@@ -222,7 +222,7 @@ func isSafeForUpdate(logger logr.Logger, inMemory *unstructured.Unstructured, on
 }
 
 // recudedMetadata returns the metadata of the given unstructured object,
-// excluding a couple of fields which should not be taken into account
+// excluding a few fields which should not be taken into account
 // for equality checks. The excluded fields are:
 //
 //   - metadata.resourceVersion
