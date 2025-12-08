@@ -149,7 +149,7 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 				return resolveErr
 			}
 			if !resolved {
-				return updateErr
+				return fmt.Errorf("refreshing object not considered safe during status update: %w", updateErr)
 			}
 			return fmt.Errorf("status update conflict") // retriable error.
 		} else if updateErr != nil {
@@ -182,7 +182,7 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 				return resolveErr
 			}
 			if !resolved {
-				return updateErr
+				return fmt.Errorf("refreshing object not considered safe during update: %w", updateErr)
 			}
 			return fmt.Errorf("update conflict due to externally-managed status conditions") // retriable error.
 		} else if updateErr != nil {
@@ -197,11 +197,11 @@ func (u *Updater) Apply(ctx context.Context, baseObj *unstructured.Unstructured)
 
 func isSafeForUpdate(logger logr.Logger, inMemory *unstructured.Unstructured, onCluster *unstructured.Unstructured) bool {
 	// Compare metadata (excluding resourceVersion).
-	inMemoryMetadata := metadataWithoutResourceVersion(inMemory)
-	onClusterMetadata := metadataWithoutResourceVersion(onCluster)
+	inMemoryMetadata := reducedMetadata(inMemory)
+	onClusterMetadata := reducedMetadata(onCluster)
 	if !reflect.DeepEqual(inMemoryMetadata, onClusterMetadata) {
-		// Diff in generation. Nothing we can do about it -> Fail.
-		logger.V(1).Info("Not refreshing object due to generation mismatch",
+		// Diff in metadata. Nothing we can do about it -> Fail.
+		logger.V(1).Info("Not refreshing object due to metadata mismatch",
 			"namespace", inMemory.GetNamespace(),
 			"name", inMemory.GetName(),
 			"gkv", inMemory.GroupVersionKind(),
@@ -221,19 +221,40 @@ func isSafeForUpdate(logger logr.Logger, inMemory *unstructured.Unstructured, on
 	return true
 }
 
-func metadataWithoutResourceVersion(u *unstructured.Unstructured) map[string]interface{} {
+// recudedMetadata returns the metadata of the given unstructured object,
+// excluding a few fields which should not be taken into account
+// for equality checks. The excluded fields are:
+//
+//   - metadata.resourceVersion
+//   - metadata.managedFields
+//   - metadata.annotation."kubectl.kubernetes.io/last-applied-configuration"
+func reducedMetadata(u *unstructured.Unstructured) map[string]interface{} {
 	metadata, ok := u.Object["metadata"].(map[string]interface{})
 	if !ok {
 		return nil
 	}
-	modifiedMetadata := make(map[string]interface{}, len(metadata))
-	for k, v := range metadata {
-		if k == "resourceVersion" {
-			continue
-		}
-		modifiedMetadata[k] = v
+	modifiedMetadata := excludeFromMap(metadata, "resourceVersion", "managedFields")
+	if annotations, found := modifiedMetadata["annotations"].(map[string]interface{}); found {
+		modifiedMetadata["annotations"] = excludeFromMap(annotations, "kubectl.kubernetes.io/last-applied-configuration")
 	}
+
 	return modifiedMetadata
+}
+
+// excludeFromMap returns a new map that contains all key-value pairs from inputMap
+// except those whose keys are in the keys slice.
+func excludeFromMap(inputMap map[string]interface{}, keys ...string) map[string]interface{} {
+	resultMap := make(map[string]interface{}, len(inputMap))
+	excludeKeys := make(map[string]struct{})
+	for _, k := range keys {
+		excludeKeys[k] = struct{}{}
+	}
+	for k, v := range inputMap {
+		if _, found := excludeKeys[k]; !found {
+			resultMap[k] = v
+		}
+	}
+	return resultMap
 }
 
 func (u *Updater) tryRefresh(ctx context.Context, obj *unstructured.Unstructured) (bool, error) {
