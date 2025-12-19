@@ -205,6 +205,8 @@ func isSafeForUpdate(logger logr.Logger, inMemory *unstructured.Unstructured, on
 			"namespace", inMemory.GetNamespace(),
 			"name", inMemory.GetName(),
 			"gkv", inMemory.GroupVersionKind(),
+			"inMemoryMetadata", inMemoryMetadata,
+			"onClusterMetadata", onClusterMetadata,
 		)
 		return false
 	}
